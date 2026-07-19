@@ -57,44 +57,86 @@ function showOverlay(html){
 function hideOverlay(){ document.getElementById('overlay').style.display = 'none'; }
 
 // ---------------------------------------------------------------- lobby / connection
+const ICE_CONFIG = {
+  config: {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+    ]
+  }
+};
+
+function connectTimeoutGuard(label, ms=20000){
+  return setTimeout(()=>{
+    if (G.phase==='lobby'){
+      const el = document.getElementById('connStatus');
+      el.style.display='block';
+      el.innerHTML = `⚠️ ${label} tidak kunjung berhasil dalam ${ms/1000} detik.<br>
+        Kemungkinan jaringan salah satu pihak (WiFi kantor/kampus atau operator seluler tertentu) memblokir koneksi WebRTC.<br>
+        Coba: (1) refresh halaman dan ulangi, (2) salah satu pindah ke jaringan lain (mis. hotspot HP berbeda operator), atau (3) pastikan kode room disalin lengkap tanpa spasi.`;
+    }
+  }, ms);
+}
+
 document.getElementById('btnHost').onclick = () => {
   G.isHost = true; G.mySide = 'p2';
-  G.peer = new Peer();
+  G.peer = new Peer(ICE_CONFIG);
+  const guard = connectTimeoutGuard('Menunggu teman join');
   G.peer.on('open', id => {
     document.getElementById('hostCodeBox').style.display = 'block';
     document.getElementById('hostCodeDisplay').value = id;
   });
   G.peer.on('connection', c => {
+    clearTimeout(guard);
     G.conn = c;
     wireConn();
     document.getElementById('connStatus').style.display='block';
     document.getElementById('connStatus').textContent = 'Teman terhubung! Menyiapkan Kartu Sandi...';
     startCardSelectPhase();
   });
-  G.peer.on('error', e => { alert('Peer error: '+e); });
+  G.peer.on('error', e => {
+    const el = document.getElementById('connStatus');
+    el.style.display='block';
+    el.textContent = 'Gagal membuat room: '+e.type+'. Coba refresh halaman dan ulangi.';
+  });
 };
 
 document.getElementById('btnJoin').onclick = () => {
   const code = document.getElementById('joinCodeInput').value.trim();
   if (!code) return alert('Masukkan kode room dulu.');
   G.isHost = false; G.mySide = 'p1';
-  G.peer = new Peer();
+  G.peer = new Peer(ICE_CONFIG);
+  const guard = connectTimeoutGuard('Menghubungkan ke room');
   G.peer.on('open', () => {
-    G.conn = G.peer.connect(code);
-    wireConn();
+    G.conn = G.peer.connect(code, { reliable: true });
+    wireConn(guard);
     document.getElementById('connStatus').style.display='block';
     document.getElementById('connStatus').textContent = 'Menghubungkan ke room...';
   });
-  G.peer.on('error', e => { alert('Peer error: '+e); });
+  G.peer.on('error', e => {
+    clearTimeout(guard);
+    const el = document.getElementById('connStatus');
+    el.style.display='block';
+    el.textContent = 'Gagal terhubung: '+e.type+'. Cek lagi kode room-nya, atau minta temanmu buat room baru.';
+  });
 };
 
-function wireConn(){
+function wireConn(guard){
   G.conn.on('open', () => {
+    if (guard) clearTimeout(guard);
     document.getElementById('connStatus').textContent = 'Terhubung! Menyiapkan Kartu Sandi...';
     startCardSelectPhase();
   });
   G.conn.on('data', handleMessage);
   G.conn.on('close', () => { banner('Koneksi dengan lawan terputus.'); });
+  G.conn.on('error', e => {
+    const el = document.getElementById('connStatus');
+    el.style.display='block';
+    el.textContent = 'Kesalahan koneksi: '+(e.type||e.message||e)+'. Coba refresh dan ulangi.';
+  });
 }
 
 // ---------------------------------------------------------------- CARD SELECT PHASE
