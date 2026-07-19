@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Hidden Code — PvP Online</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  :root{
+    --red:#c0392b; --blue:#2e5aa8; --bg:#1b1f27; --panel:#242a35; --panel2:#2c3442;
+    --line:#3a4354; --gold:#e0b93d; --text:#eef1f6; --muted:#9aa4b5;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text);
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:16px;
+  }
+  h1{font-size:1.3rem; margin:6px 0 2px; letter-spacing:.5px;}
+  h1 span{color:var(--gold);}
+  .subtitle{color:var(--muted); font-size:.8rem; margin-bottom:14px;}
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px;
+    max-width:480px; width:100%; margin-bottom:14px;
+  }
+  .card h2{margin:0 0 10px; font-size:1rem; color:var(--gold);}
+  input[type=text]{
+    width:100%; padding:10px; border-radius:6px; border:1px solid var(--line);
+    background:#161a21; color:var(--text); font-size:.95rem; margin:6px 0;
+  }
+  button{
+    cursor:pointer; border:none; border-radius:6px; padding:10px 16px; font-weight:600;
+    font-size:.9rem; background:var(--gold); color:#1b1f27; margin:4px 4px 4px 0;
+    transition:filter .15s;
+  }
+  button:hover{filter:brightness(1.08);}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  button.secondary{background:var(--panel2); color:var(--text); border:1px solid var(--line);}
+  button.danger{background:var(--red); color:#fff;}
+  .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+  .pill{
+    display:inline-block; padding:4px 10px; border-radius:20px; font-size:.75rem;
+    background:var(--panel2); border:1px solid var(--line); margin:2px;
+  }
+  .pill.side-p1{border-color:var(--red); color:#ff8f7d;}
+  .pill.side-p2{border-color:var(--blue); color:#8fb2ff;}
+  #gameArea{display:none; width:100%; max-width:1000px;}
+  .layout{display:flex; gap:16px; flex-wrap:wrap; justify-content:center;}
+  #board{
+    display:grid; grid-template-columns:repeat(6,54px); grid-template-rows:repeat(7,54px);
+    gap:2px; background:var(--line); padding:2px; border-radius:8px;
+  }
+  .cell{
+    background:#10141a; display:flex; align-items:center; justify-content:center;
+    font-size:1.4rem; position:relative; cursor:default; border-radius:3px; user-select:none;
+  }
+  .cell.zone-p1{background:#241417;}
+  .cell.zone-p2{background:#131c26;}
+  .cell.zone-neutral{background:#181a14;}
+  .cell.clickable{cursor:pointer; outline:2px solid transparent;}
+  .cell.clickable:hover{outline-color:var(--gold);}
+  .cell.selected{outline:3px solid var(--gold); z-index:2;}
+  .cell.legal-target{box-shadow:inset 0 0 0 3px rgba(224,185,61,.55);}
+  .cell.aura-marker::after{
+    content:''; position:absolute; inset:3px; border:2px dashed rgba(255,255,255,.25); border-radius:4px; pointer-events:none;
+  }
+  .cell .coord{position:absolute; top:1px; left:3px; font-size:.55rem; color:#556; }
+  .piece-p1{color:#ff6a52; text-shadow:0 0 4px #000;}
+  .piece-p2{color:#66a0ff; text-shadow:0 0 4px #000;}
+  #sidePanel{
+    width:300px; display:flex; flex-direction:column; gap:12px;
+  }
+  #logPanel{
+    background:#10141a; border:1px solid var(--line); border-radius:8px; padding:10px;
+    height:180px; overflow-y:auto; font-size:.78rem; line-height:1.5; color:#c7cedb;
+  }
+  #logPanel div{border-bottom:1px dashed #262c37; padding:2px 0;}
+  #poolPanel{display:flex; flex-wrap:wrap; gap:6px;}
+  .poolBtn{
+    background:var(--panel2); border:1px solid var(--line); color:var(--text);
+    width:38px; height:38px; border-radius:6px; font-weight:700; padding:0;
+  }
+  .poolBtn.used{opacity:.25; cursor:not-allowed; text-decoration:line-through;}
+  .poolBtn.active{background:var(--gold); color:#1b1f27; outline:2px solid #fff;}
+  #banner{
+    background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:10px 14px;
+    font-size:.85rem; margin-bottom:10px; min-height:20px;
+  }
+  #statusBar{font-size:.75rem; color:var(--muted); margin-bottom:6px;}
+  .split-options{display:flex; flex-direction:column; gap:6px; margin:8px 0;}
+  .split-opt{
+    background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:8px 10px;
+    cursor:pointer; font-size:.85rem;
+  }
+  .split-opt.chosen{border-color:var(--gold); background:#31301c;}
+  #overlay{
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:50;
+    align-items:center; justify-content:center;
+  }
+  #overlayBox{background:var(--panel); border:2px solid var(--gold); border-radius:12px; padding:24px; max-width:400px; text-align:center;}
+  small.hint{color:var(--muted); display:block; margin-top:6px; font-size:.72rem;}
+</style>
+</head>
+<body>
+
+<h1>DOMINO CHECKMATE — <span>THE HIDDEN CODE</span></h1>
+<div class="subtitle">Versi PvP Online (P2P langsung, tanpa server) &middot; sesuai Buku Panduan Edisi Revisi</div>
+
+<!-- ===================== LOBBY ===================== -->
+<div id="lobby">
+  <div class="card">
+    <h2>1. Buat Room (jadi Biru — pasang bidak duluan)</h2>
+    <button id="btnHost">Buat Room Baru</button>
+    <div id="hostCodeBox" style="display:none; margin-top:10px;">
+      <div class="pill side-p2">Kode Room kamu:</div>
+      <input type="text" id="hostCodeDisplay" readonly>
+      <small class="hint">Kirim kode ini ke temanmu lewat chat manapun. Tunggu dia join.</small>
+    </div>
+  </div>
+  <div class="card">
+    <h2>2. Gabung Room Teman (jadi Merah — jalan duluan Ronde 1)</h2>
+    <input type="text" id="joinCodeInput" placeholder="Tempel kode room dari temanmu di sini">
+    <button id="btnJoin">Gabung</button>
+  </div>
+  <div id="connStatus" class="card" style="display:none;"></div>
+</div>
+
+<!-- ===================== CARD SELECTION ===================== -->
+<div id="cardSelectArea" class="card" style="display:none; max-width:560px;">
+  <h2>Pilih Kartu Sandi (Rahasia — lawan tidak akan lihat ini)</h2>
+  <div id="topSelectUI"></div>
+  <div id="bottomSelectUI"></div>
+  <button id="btnLockCard" disabled>Kunci Kartu Sandi</button>
+  <div id="cardReadyStatus" style="margin-top:8px; font-size:.8rem; color:var(--muted);"></div>
+</div>
+
+<!-- ===================== GAME AREA ===================== -->
+<div id="gameArea">
+  <div id="statusBar"></div>
+  <div id="banner">Menunggu...</div>
+  <div class="layout">
+    <div id="board"></div>
+    <div id="sidePanel">
+      <div class="card" style="margin:0;">
+        <h2 id="phaseTitle">Fase</h2>
+        <div id="phaseControls"></div>
+      </div>
+      <div class="card" style="margin:0;">
+        <h2>Pool Energi Saya</h2>
+        <div id="poolPanel"></div>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnGuessOpen" class="secondary">Aksi Bongkar Sandi 🔍</button>
+        </div>
+        <small class="hint" id="guessQuotaHint"></small>
+      </div>
+      <div class="card" style="margin:0;">
+        <h2>Lembar Jejak Publik</h2>
+        <div id="logPanel"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="overlay">
+  <div id="overlayBox"></div>
+</div>
+
+<script src="game-core.js"></script>
+<script src="game-network.js"></script>
+</body>
+</html>
