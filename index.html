@@ -58,14 +58,20 @@
   .cell.zone-neutral{background:#181a14;}
   .cell.clickable{cursor:pointer; outline:2px solid transparent;}
   .cell.clickable:hover{outline-color:var(--gold);}
-  .cell.selected{outline:3px solid var(--gold); z-index:2;}
-  .cell.legal-target{box-shadow:inset 0 0 0 3px rgba(224,185,61,.55);}
+  .cell.selected{outline:3px solid var(--gold); background:rgba(224,185,61,.35); z-index:2;}
+  .cell.legal-target{background:rgba(94,224,138,.28); box-shadow:inset 0 0 0 2px rgba(94,224,138,.7);}
+  .cell.legal-target:hover{background:rgba(94,224,138,.45);}
   .cell.aura-marker::after{
     content:''; position:absolute; inset:3px; border:2px dashed rgba(255,255,255,.25); border-radius:4px; pointer-events:none;
   }
   .cell .coord{position:absolute; top:1px; left:3px; font-size:.55rem; color:#556; }
-  .piece-p1{color:#ff6a52; text-shadow:0 0 4px #000;}
-  .piece-p2{color:#66a0ff; text-shadow:0 0 4px #000;}
+  .piece-p1, .piece-p2{
+    display:flex; align-items:center; justify-content:center;
+    width:36px; height:36px; border-radius:50%;
+    text-shadow:0 0 3px #000;
+  }
+  .piece-p1{background:rgba(192,57,43,.35); border:2px solid var(--red);}
+  .piece-p2{background:rgba(46,90,168,.35); border:2px solid var(--blue);}
   #sidePanel{
     width:300px; display:flex; flex-direction:column; gap:12px;
   }
@@ -154,6 +160,9 @@
       </div>
       <div class="card" style="margin:0;">
         <h2>Lembar Jejak Publik</h2>
+        <div id="tracePanel" style="font-family:monospace; font-size:.95rem; line-height:1.9; margin-bottom:8px;"></div>
+        <div style="border-top:1px solid var(--line); margin:6px 0 8px; opacity:.5;"></div>
+        <small class="hint" style="margin-bottom:4px; display:block;">Riwayat Aksi</small>
         <div id="logPanel"></div>
       </div>
     </div>

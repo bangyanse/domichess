@@ -17,6 +17,8 @@ const G = {
   turnsLeft:{p1:6, p2:6},
   activeSide:'p1',
   guessStats:{p1:{count:0,wrong:0}, p2:{count:0,wrong:0}},
+  publicTrace:{p1:[], p2:[]},
+  pendingGuessValue:null,
   selectedCell:null,
   remainingSteps:0,
   activePoolIdx:null,
@@ -28,6 +30,12 @@ const G = {
 if (typeof window !== 'undefined') window.G = G;
 
 // ---------------------------------------------------------------- utilities
+function renderPublicTrace(){
+  const el = document.getElementById('tracePanel');
+  el.innerHTML =
+    `<div><b style="color:var(--red);">[Merah]</b> ${G.publicTrace.p1.join(', ')}</div>` +
+    `<div><b style="color:var(--blue);">[Biru]</b> ${G.publicTrace.p2.join(', ')}</div>`;
+}
 function log(text){
   const el = document.getElementById('logPanel');
   const d = document.createElement('div');
@@ -246,6 +254,7 @@ function renderAll(){
   renderPool();
   renderBattleControls();
   statusBar();
+  renderPublicTrace();
 }
 
 function renderPool(){
@@ -273,18 +282,19 @@ function renderBattleControls(){
   const box = document.getElementById('phaseControls');
   box.innerHTML='';
   const myTurn = G.activeSide === G.mySide;
+  const armedFresh = G.activePoolIdx!==null && G.remainingSteps === G.myPool[G.activePoolIdx].value && !G.selectedCell;
   if (!myTurn){
     banner(`Menunggu giliran ${G.activeSide==='p1'?'Merah':'Biru'}...`);
     box.innerHTML = '<small class="hint">Bukan giliran Anda.</small>';
   } else if (G.remainingSteps>0){
-    banner(`Sisa alokasi jarak langkah aktif: ${G.remainingSteps}. Klik bidak Anda lalu klik petak tujuan.`);
-    box.innerHTML = '<small class="hint">Anda wajib menghabiskan seluruh nilai Poin Gerak ini sebelum giliran berpindah.</small>';
+    banner(`Poin Gerak ${G.myPool[G.activePoolIdx].value} aktif (sisa ${G.remainingSteps}). Klik bidak Anda lalu klik petak tujuan — atau lakukan Aksi Bongkar Sandi untuk mengorbankan Poin Gerak ini.`);
+    box.innerHTML = '<small class="hint">Anda wajib menghabiskan seluruh nilai Poin Gerak ini untuk melangkah, kecuali dipakai untuk Aksi Bongkar Sandi.</small>';
   } else {
-    banner('Giliran Anda: pilih satu Poin Gerak di panel Pool Energi, atau lakukan Aksi Bongkar Sandi.');
-    box.innerHTML = '<small class="hint">Pilih Poin Gerak di bawah untuk mulai melangkah.</small>';
+    banner('Giliran Anda: pilih satu Poin Gerak di panel Pool Energi untuk mulai melangkah atau menebak.');
+    box.innerHTML = '<small class="hint">Pilih Poin Gerak di bawah dulu.</small>';
   }
   const guessBtn = document.getElementById('btnGuessOpen');
-  guessBtn.disabled = !(myTurn && G.remainingSteps===0 && G.guessStats[G.mySide].count<2 && G.myPool.some(s=>!s.used));
+  guessBtn.disabled = !(myTurn && armedFresh && G.guessStats[G.mySide].count<2);
 }
 
 function onCellClickBattle(cell){
@@ -294,10 +304,10 @@ function onCellClickBattle(cell){
   if (!G.selectedCell){
     if (!piece || piece.side!==G.mySide) return;
     G.selectedCell = cell;
-    renderBoard();
+    renderAll();
     return;
   }
-  if (cell === G.selectedCell){ G.selectedCell=null; renderBoard(); return; }
+  if (cell === G.selectedCell){ G.selectedCell=null; renderAll(); return; }
 
   const check = validateMove(G.boardPieces, G.mySide, G.selectedCell, cell);
   if (!check.ok) return alert(check.reason);
@@ -320,20 +330,25 @@ function onCellClickBattle(cell){
   }
 
   if (G.remainingSteps===0){
+    const usedVal = G.myPool[G.activePoolIdx].value;
     G.myPool[G.activePoolIdx].used = true;
     G.activePoolIdx = null;
-    finishMyTurn();
+    finishMyTurn(usedVal);
   } else {
     renderAll();
   }
 }
 
-function finishMyTurn(){
-  advanceTurn(G.mySide);
-  send({type:'advanceTurn', side:G.mySide});
+function finishMyTurn(usedValue){
+  advanceTurn(G.mySide, usedValue);
+  send({type:'advanceTurn', side:G.mySide, value:usedValue});
 }
 
-function advanceTurn(sideThatActed){
+function advanceTurn(sideThatActed, usedValue){
+  if (usedValue!==undefined && usedValue!==null){
+    G.publicTrace[sideThatActed].push(usedValue);
+    renderPublicTrace();
+  }
   G.turnsLeft[sideThatActed] = Math.max(0, G.turnsLeft[sideThatActed]-1);
   G.activeSide = sideThatActed==='p1' ? 'p2' : 'p1';
   if (G.turnsLeft.p1<=0 && G.turnsLeft.p2<=0){
@@ -345,9 +360,12 @@ function advanceTurn(sideThatActed){
 
 // ---------------------------------------------------------------- AKSI BONGKAR SANDI (guess)
 document.getElementById('btnGuessOpen').onclick = () => {
+  if (G.activePoolIdx===null) return;
+  const sacValue = G.myPool[G.activePoolIdx].value;
   showOverlay(`
     <h2 style="margin-top:0;color:var(--gold);">Aksi Bongkar Sandi</h2>
-    <p style="font-size:.85rem;color:var(--muted);">Tebak kombinasi Kartu Sandi lawan. Ini akan mengorbankan 1 Poin Gerak dan giliran Anda.</p>
+    <p style="font-size:.85rem;color:var(--muted);">Tebak kombinasi Kartu Sandi lawan. Tindakan ini akan mengorbankan
+      <b style="color:var(--gold);">Poin Gerak bernilai ${sacValue}</b> yang sudah Anda pilih, beserta giliran Anda.</p>
     <div class="row" id="guessTopRow"></div>
     <div class="row" id="guessBotRow" style="margin-top:8px;"></div>
     <div style="margin-top:14px;">
@@ -372,12 +390,13 @@ document.getElementById('btnGuessOpen').onclick = () => {
     document.getElementById('btnSubmitGuess').disabled = !(g.top && g.bottom);
   }
   document.getElementById('btnSubmitGuess').onclick = () => {
-    const idx = G.myPool.findIndex(s=>!s.used);
-    if (idx<0) return alert('Tidak ada Poin Gerak tersisa untuk dikorbankan.');
-    G.myPool[idx].used = true;
+    const usedValue = G.myPool[G.activePoolIdx].value;
+    G.myPool[G.activePoolIdx].used = true;
+    G.activePoolIdx = null;
+    G.remainingSteps = 0;
     G.guessStats[G.mySide].count++;
+    G.pendingGuessValue = usedValue;
     send({type:'guess', side:G.mySide, topVal:g.top, bottomVal:g.bottom});
-    log(`[${G.mySide==='p1'?'Merah':'Biru'}] melakukan Aksi Bongkar Sandi: menebak Atas ${g.top} / Bawah ${g.bottom}...`);
     showOverlay('<p>Menunggu jawaban lawan...</p>');
     renderAll();
   };
@@ -419,7 +438,7 @@ function handleMessage(msg){
     }
 
     case 'advanceTurn':
-      advanceTurn(msg.side);
+      advanceTurn(msg.side, msg.value);
       break;
 
     case 'guess': {
@@ -478,7 +497,8 @@ function promptGuardSacrifice(){
   const guards = Object.entries(G.boardPieces).filter(([c,p])=>p.side===G.mySide && (p.type==='PH'||p.type==='PV'));
   if (guards.length===0){
     // Tidak ada Penjaga tersisa untuk dikorbankan — tetap lanjut giliran (kasus edge, sesuai desain tumbal fisik)
-    finishMyTurn();
+    finishMyTurn(G.pendingGuessValue);
+    G.pendingGuessValue = null;
     return;
   }
   showOverlay(`
@@ -496,7 +516,8 @@ function promptGuardSacrifice(){
       log(`[Tumbal Penjaga] Anda kehilangan ${pieceName(p.type)} di ${cell}.`);
       hideOverlay();
       renderBoard();
-      finishMyTurn();
+      finishMyTurn(G.pendingGuessValue);
+      G.pendingGuessValue = null;
     };
     row.appendChild(b);
   });
@@ -588,10 +609,34 @@ function endGame(winnerSide, reasonText){
   log(`=== PERTANDINGAN SELESAI: ${reasonText} ===`);
 }
 
+function computeLegalTargets(){
+  if (!G.selectedCell || G.remainingSteps<=0 || G.phase!=='battle') return [];
+  const results = [];
+  const r0 = rOf(G.selectedCell), c0 = cOf(G.selectedCell);
+  for (let c=1;c<=6;c++){
+    if (c===c0) continue;
+    const dest = cellId(r0,c);
+    const cost = moveCost(G.selectedCell, dest);
+    if (cost>=1 && cost<=G.remainingSteps){
+      if (validateMove(G.boardPieces, G.mySide, G.selectedCell, dest).ok) results.push(dest);
+    }
+  }
+  for (let r=0;r<7;r++){
+    if (r===r0) continue;
+    const dest = cellId(r,c0);
+    const cost = moveCost(G.selectedCell, dest);
+    if (cost>=1 && cost<=G.remainingSteps){
+      if (validateMove(G.boardPieces, G.mySide, G.selectedCell, dest).ok) results.push(dest);
+    }
+  }
+  return results;
+}
+
 // ---------------------------------------------------------------- BOARD RENDERING
 function renderBoard(){
   const board = document.getElementById('board');
   board.innerHTML='';
+  const legalTargets = new Set(computeLegalTargets());
   for (let r=0;r<7;r++){
     for (let c=1;c<=6;c++){
       const id = cellId(r,c);
@@ -609,6 +654,7 @@ function renderBoard(){
         div.appendChild(span);
       }
       if (G.selectedCell===id) div.classList.add('selected');
+      if (legalTargets.has(id)) div.classList.add('legal-target');
 
       const clickable = (G.phase==='setupPlacement' && currentPlacementSide()===G.mySide) ||
                          (G.phase==='battle' && G.activeSide===G.mySide);

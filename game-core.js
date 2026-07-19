@@ -155,7 +155,7 @@ function validateMove(board, side, srcCell, destCell){
 }
 
 function pieceIcon(type){
-  return { K:'👑', PH:'🛡️', PV:'🛡️', SR:'⚔️' }[type] || '?';
+  return { K:'👑', PH:'↔️', PV:'↕️', SR:'⚔️' }[type] || '?';
 }
 function pieceName(type){
   return { K:'Raja', PH:'Penjaga Horizontal', PV:'Penjaga Vertikal', SR:'Penyerang' }[type] || type;
