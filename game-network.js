@@ -62,6 +62,8 @@ const ICE_CONFIG = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:freestun.net:3478' },
+      { urls: 'turn:freestun.net:3478', username: 'free', credential: 'free' },
       { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
       { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
       { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
@@ -74,11 +76,54 @@ function connectTimeoutGuard(label, ms=20000){
     if (G.phase==='lobby'){
       const el = document.getElementById('connStatus');
       el.style.display='block';
-      el.innerHTML = `⚠️ ${label} tidak kunjung berhasil dalam ${ms/1000} detik.<br>
-        Kemungkinan jaringan salah satu pihak (WiFi kantor/kampus atau operator seluler tertentu) memblokir koneksi WebRTC.<br>
-        Coba: (1) refresh halaman dan ulangi, (2) salah satu pindah ke jaringan lain (mis. hotspot HP berbeda operator), atau (3) pastikan kode room disalin lengkap tanpa spasi.`;
+      let warnBox = document.getElementById('connWarnBox');
+      if (!warnBox){
+        warnBox = document.createElement('div');
+        warnBox.id = 'connWarnBox';
+        el.insertBefore(warnBox, el.firstChild);
+      }
+      warnBox.innerHTML = `⚠️ ${label} tidak kunjung berhasil dalam ${ms/1000} detik.<br>
+        Lihat baris "Diagnostik teknis" di bawah ini:<br>
+        • Kalau <b>jenis kandidat</b> cuma "host" saja (tidak ada srflx/relay) → jaringan salah satu pihak memblokir WebRTC total.<br>
+        • Kalau ada "srflx"/"relay" tapi status ICE tetap "checking" atau "failed" → NAT kedua pihak sama-sama ketat, butuh server TURN yang lebih andal.<br>
+        Coba: refresh dan ulangi, atau pindah salah satu ke jaringan lain.`;
     }
   }, ms);
+}
+
+function attachIceDiagnostics(conn){
+  const candidateTypes = new Set();
+  function ensureLine(){
+    let line = document.getElementById('iceDiagLine');
+    if (!line){
+      line = document.createElement('div');
+      line.id = 'iceDiagLine';
+      line.style.cssText = 'font-size:.72rem;color:var(--muted);margin-top:8px;line-height:1.5;';
+      document.getElementById('connStatus').appendChild(line);
+    }
+    return line;
+  }
+  function update(){
+    const pc = conn.peerConnection;
+    if (!pc) return;
+    ensureLine().textContent =
+      `Diagnostik teknis — status ICE: ${pc.iceConnectionState} · pengumpulan kandidat: ${pc.iceGatheringState} · jenis kandidat ditemukan: ${[...candidateTypes].join(', ') || '(belum ada)'}`;
+  }
+  (function poll(){
+    const pc = conn.peerConnection;
+    if (!pc){ setTimeout(poll, 200); return; }
+    pc.addEventListener('iceconnectionstatechange', update);
+    pc.addEventListener('icegatheringstatechange', update);
+    pc.addEventListener('icecandidate', e => {
+      if (e.candidate && e.candidate.candidate){
+        const parts = e.candidate.candidate.split(' ');
+        const i = parts.indexOf('typ');
+        if (i>=0) candidateTypes.add(parts[i+1]);
+      }
+      update();
+    });
+    update();
+  })();
 }
 
 document.getElementById('btnHost').onclick = () => {
@@ -95,6 +140,7 @@ document.getElementById('btnHost').onclick = () => {
     wireConn();
     document.getElementById('connStatus').style.display='block';
     document.getElementById('connStatus').textContent = 'Teman terhubung! Menyiapkan Kartu Sandi...';
+    attachIceDiagnostics(c);
     startCardSelectPhase();
   });
   G.peer.on('error', e => {
@@ -115,6 +161,7 @@ document.getElementById('btnJoin').onclick = () => {
     wireConn(guard);
     document.getElementById('connStatus').style.display='block';
     document.getElementById('connStatus').textContent = 'Menghubungkan ke room...';
+    attachIceDiagnostics(G.conn);
   });
   G.peer.on('error', e => {
     clearTimeout(guard);
