@@ -57,19 +57,37 @@ function showOverlay(html){
 function hideOverlay(){ document.getElementById('overlay').style.display = 'none'; }
 
 // ---------------------------------------------------------------- lobby / connection
-const ICE_CONFIG = {
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:freestun.net:3478' },
-      { urls: 'turn:freestun.net:3478', username: 'free', credential: 'free' },
-      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-    ]
-  }
-};
+
+// Kredensial TURN dedicated (akun Metered.ca "domchess", free trial 500MB/bulan).
+// Plan free/trial cuma bisa pakai host "standard.relay.metered.ca" (bukan "global").
+const METERED_USERNAME   = '1329f5dcef2360add71e2266';
+const METERED_CREDENTIAL = 'XIUmIhfq0t/7TIhf';
+
+const DEDICATED_ICE_SERVERS = [
+  { urls: 'stun:stun.relay.metered.ca:80' },
+  { urls: 'turn:standard.relay.metered.ca:80', username: METERED_USERNAME, credential: METERED_CREDENTIAL },
+  { urls: 'turn:standard.relay.metered.ca:80?transport=tcp', username: METERED_USERNAME, credential: METERED_CREDENTIAL },
+  { urls: 'turn:standard.relay.metered.ca:443', username: METERED_USERNAME, credential: METERED_CREDENTIAL },
+  { urls: 'turns:standard.relay.metered.ca:443?transport=tcp', username: METERED_USERNAME, credential: METERED_CREDENTIAL },
+];
+
+const FALLBACK_ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:freestun.net:3478' },
+  { urls: 'turn:freestun.net:3478', username: 'free', credential: 'free' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+];
+
+async function buildIceConfig(){
+  // Dedicated (kuota sendiri, lebih andal) diprioritaskan; publik jadi cadangan kalau kuota habis.
+  const iceServers = [...DEDICATED_ICE_SERVERS, ...FALLBACK_ICE_SERVERS];
+  return { debug: 2, config: { iceServers } };
+}
+
+
 
 function connectTimeoutGuard(label, ms=20000){
   return setTimeout(()=>{
@@ -126,9 +144,14 @@ function attachIceDiagnostics(conn){
   })();
 }
 
-document.getElementById('btnHost').onclick = () => {
+document.getElementById('btnHost').onclick = async () => {
   G.isHost = true; G.mySide = 'p2';
-  G.peer = new Peer(ICE_CONFIG);
+  document.getElementById('btnHost').disabled = true;
+  document.getElementById('btnHost').textContent = 'Menyiapkan koneksi...';
+  const iceConfig = await buildIceConfig();
+  document.getElementById('btnHost').textContent = 'Buat Room Baru';
+  document.getElementById('btnHost').disabled = false;
+  G.peer = new Peer(iceConfig);
   const guard = connectTimeoutGuard('Menunggu teman join');
   G.peer.on('open', id => {
     document.getElementById('hostCodeBox').style.display = 'block';
@@ -150,11 +173,16 @@ document.getElementById('btnHost').onclick = () => {
   });
 };
 
-document.getElementById('btnJoin').onclick = () => {
+document.getElementById('btnJoin').onclick = async () => {
   const code = document.getElementById('joinCodeInput').value.trim();
   if (!code) return alert('Masukkan kode room dulu.');
   G.isHost = false; G.mySide = 'p1';
-  G.peer = new Peer(ICE_CONFIG);
+  document.getElementById('btnJoin').disabled = true;
+  document.getElementById('btnJoin').textContent = 'Menyiapkan koneksi...';
+  const iceConfig = await buildIceConfig();
+  document.getElementById('btnJoin').textContent = 'Gabung';
+  document.getElementById('btnJoin').disabled = false;
+  G.peer = new Peer(iceConfig);
   const guard = connectTimeoutGuard('Menghubungkan ke room');
   G.peer.on('open', () => {
     G.conn = G.peer.connect(code, { reliable: true });
