@@ -5,6 +5,7 @@
 
 const G = {
   peer:null, conn:null,
+  mode:'pvp',                          // 'pvp' or 'bot'
   isHost:false, mySide:null,          // 'p1' (Merah, guest) or 'p2' (Biru, host)
   phase:'lobby',
   myCard:null, myPool:[],
@@ -19,12 +20,13 @@ const G = {
   guessStats:{p1:{count:0,wrong:0}, p2:{count:0,wrong:0}},
   publicTrace:{p1:[], p2:[]},
   pendingGuessValue:null,
+  lastGuesser:null,
   selectedCell:null,
   remainingSteps:0,
   activePoolIdx:null,
   myReadyCard:false, peerReadyCard:false,
   roundReadyMe:false, roundReadyPeer:false,
-  pendingBottomChoice:null,
+  pendingTopChoice:null,
   gameEnded:false,
 };
 if (typeof window !== 'undefined') window.G = G;
@@ -49,12 +51,41 @@ function statusBar(){
   document.getElementById('statusBar').textContent =
     `Kamu: ${sideLabel} · Ronde ${G.round} · Giliran tersisa — Merah:${G.turnsLeft.p1} Biru:${G.turnsLeft.p2}`;
 }
-function send(msg){ if (G.conn && G.conn.open) G.conn.send(msg); }
+function send(msg){
+  if (G.mode === 'bot'){ Bot.onHumanMessage(msg); return; }
+  if (G.conn && G.conn.open) G.conn.send(msg);
+}
+// 'guessResult' selalu dikirim balik ke SI PENEBAK. Di PvP itu lewat kabel P2P (send()).
+// Di mode bot, penebak & pembela berbagi satu context yang sama, jadi harus dieksekusi
+// langsung lewat handleMessage() — bukan lewat send(), yang di mode bot dikhususkan utk
+// pesan-pesan yang datang DARI manusia.
+function deliverGuessResult(payload){
+  if (G.mode === 'bot') handleMessage({type:'guessResult', ...payload});
+  else send({type:'guessResult', ...payload});
+}
 function showOverlay(html){
   document.getElementById('overlayBox').innerHTML = html;
   document.getElementById('overlay').style.display = 'flex';
 }
 function hideOverlay(){ document.getElementById('overlay').style.display = 'none'; }
+
+// Feedback visual untuk aksi ilegal — flash merah di petak, tanpa toast/alert (tidak perlu klik OK)
+function flashInvalid(cellId){
+  const el = document.getElementById('cell-'+cellId);
+  if (!el) return;
+  el.classList.remove('invalid-flash');
+  void el.offsetWidth; // restart animasi
+  el.classList.add('invalid-flash');
+  setTimeout(()=>el.classList.remove('invalid-flash'), 600);
+}
+function warnInline(text){
+  const el = document.getElementById('inlineWarn');
+  if (!el) return;
+  el.textContent = text;
+  el.style.opacity = '1';
+  clearTimeout(warnInline._t);
+  warnInline._t = setTimeout(()=>{ el.style.opacity='0'; }, 1800);
+}
 
 // ---------------------------------------------------------------- lobby / connection
 
@@ -144,14 +175,28 @@ function attachIceDiagnostics(conn){
   })();
 }
 
+function sanitizeRoomCode(raw){
+  // PeerJS ID: alfanumerik + minus, dibatasi panjang agar rapi dibagikan
+  return raw.toLowerCase().replace(/[^a-z0-9-]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'').slice(0,40);
+}
+
 document.getElementById('btnHost').onclick = async () => {
   G.isHost = true; G.mySide = 'p2';
+  const errBox = document.getElementById('hostErrorBox');
+  errBox.style.display = 'none';
+  const rawCode = document.getElementById('customRoomCode').value.trim();
+  const customCode = rawCode ? sanitizeRoomCode(rawCode) : null;
+  if (rawCode && !customCode){
+    errBox.style.display = 'block';
+    errBox.textContent = 'Kode room tidak valid — pakai huruf/angka/tanda minus saja.';
+    return;
+  }
   document.getElementById('btnHost').disabled = true;
   document.getElementById('btnHost').textContent = 'Menyiapkan koneksi...';
   const iceConfig = await buildIceConfig();
   document.getElementById('btnHost').textContent = 'Buat Room Baru';
   document.getElementById('btnHost').disabled = false;
-  G.peer = new Peer(iceConfig);
+  G.peer = customCode ? new Peer(customCode, iceConfig) : new Peer(iceConfig);
   const guard = connectTimeoutGuard('Menunggu teman join');
   G.peer.on('open', id => {
     document.getElementById('hostCodeBox').style.display = 'block';
@@ -167,6 +212,11 @@ document.getElementById('btnHost').onclick = async () => {
     startCardSelectPhase();
   });
   G.peer.on('error', e => {
+    if (e.type === 'unavailable-id'){
+      errBox.style.display = 'block';
+      errBox.textContent = `Kode room "${customCode}" sudah dipakai orang lain. Coba kode lain, atau kosongkan untuk kode acak.`;
+      return;
+    }
     const el = document.getElementById('connStatus');
     el.style.display='block';
     el.textContent = 'Gagal membuat room: '+e.type+'. Coba refresh halaman dan ulangi.';
@@ -175,7 +225,9 @@ document.getElementById('btnHost').onclick = async () => {
 
 document.getElementById('btnJoin').onclick = async () => {
   const code = document.getElementById('joinCodeInput').value.trim();
-  if (!code) return alert('Masukkan kode room dulu.');
+  const joinErr = document.getElementById('joinErrorBox');
+  joinErr.style.display = 'none';
+  if (!code){ joinErr.style.display='block'; joinErr.textContent='Masukkan kode room dulu.'; return; }
   G.isHost = false; G.mySide = 'p1';
   document.getElementById('btnJoin').disabled = true;
   document.getElementById('btnJoin').textContent = 'Menyiapkan koneksi...';
@@ -197,6 +249,15 @@ document.getElementById('btnJoin').onclick = async () => {
     el.style.display='block';
     el.textContent = 'Gagal terhubung: '+e.type+'. Cek lagi kode room-nya, atau minta temanmu buat room baru.';
   });
+};
+
+document.getElementById('btnPlayBot').onclick = () => {
+  G.mode = 'bot';
+  G.isHost = true;      // tidak relevan untuk bot, tapi dipakai beberapa kondisi UI
+  G.mySide = 'p1';       // manusia selalu Merah, jalan duluan tiap ronde
+  document.getElementById('lobby').style.display = 'none';
+  Bot.init();
+  startCardSelectPhase();
 };
 
 function wireConn(guard){
@@ -314,6 +375,9 @@ function renderPlacementControls(){
   const box = document.getElementById('phaseControls');
   box.innerHTML='';
   document.getElementById('phaseTitle').textContent = 'Persiapan Awal — Penempatan Bidak';
+  if (G.mode==='bot' && side==='p2' && G.phase==='setupPlacement'){
+    setTimeout(()=>Bot.takePlacementTurn(), 500);
+  }
   if (!mine) return;
   const placed = G.placedTypesBySide[G.mySide];
   const remainingTypes = ['K','PH','PV','SR'].filter(t=>!placed.includes(t));
@@ -336,12 +400,12 @@ function renderPlacementControls(){
 function onCellClickPlacement(cell){
   const side = currentPlacementSide();
   if (side !== G.mySide) return;
-  if (!G.armedPlaceType) return alert('Pilih jenis bidak dulu di panel kanan.');
+  if (!G.armedPlaceType){ warnInline('Pilih jenis bidak dulu di panel kanan.'); return; }
   const r = rOf(cell);
   const zone = zoneOfRow(r);
-  if (zone !== G.mySide) return alert('Hanya boleh menempatkan di zona pertahanan sendiri.');
-  if (G.boardPieces[cell]) return alert('Petak sudah terisi.');
-  if (G.armedPlaceType==='K' && !(r===(G.mySide==='p1'?0:6))) return alert('Raja wajib di baris paling ujung.');
+  if (zone !== G.mySide){ flashInvalid(cell); warnInline('Hanya boleh menempatkan di zona pertahanan sendiri.'); return; }
+  if (G.boardPieces[cell]){ flashInvalid(cell); warnInline('Petak sudah terisi.'); return; }
+  if (G.armedPlaceType==='K' && !(r===(G.mySide==='p1'?0:6))){ flashInvalid(cell); warnInline('Raja wajib di baris paling ujung.'); return; }
 
   const type = G.armedPlaceType;
   G.boardPieces[cell] = { type, side: G.mySide };
@@ -427,8 +491,8 @@ function onCellClickBattle(cell){
   if (cell === G.selectedCell){ G.selectedCell=null; renderAll(); return; }
 
   const check = validateMove(G.boardPieces, G.mySide, G.selectedCell, cell);
-  if (!check.ok) return alert(check.reason);
-  if (check.cost > G.remainingSteps) return alert('Jarak ini melebihi sisa alokasi Poin Gerak Anda saat ini.');
+  if (!check.ok){ flashInvalid(cell); warnInline(check.reason); return; }
+  if (check.cost > G.remainingSteps){ flashInvalid(cell); warnInline('Jarak ini melebihi sisa alokasi Poin Gerak Anda saat ini.'); return; }
 
   const movedType = G.boardPieces[G.selectedCell].type;
   const capturedPiece = G.boardPieces[cell];
@@ -468,10 +532,14 @@ function advanceTurn(sideThatActed, usedValue){
   }
   G.turnsLeft[sideThatActed] = Math.max(0, G.turnsLeft[sideThatActed]-1);
   G.activeSide = sideThatActed==='p1' ? 'p2' : 'p1';
+  if (G.mode==='bot' && sideThatActed==='p1') Bot.onPlayerMoved();
   if (G.turnsLeft.p1<=0 && G.turnsLeft.p2<=0){
     startRoundTransition();
   } else {
     renderAll();
+    if (G.mode==='bot' && G.phase==='battle' && G.activeSide==='p2'){
+      setTimeout(()=>Bot.takeBattleTurn(), 650);
+    }
   }
 }
 
@@ -513,6 +581,7 @@ document.getElementById('btnGuessOpen').onclick = () => {
     G.remainingSteps = 0;
     G.guessStats[G.mySide].count++;
     G.pendingGuessValue = usedValue;
+    G.lastGuesser = G.mySide;
     send({type:'guess', side:G.mySide, topVal:g.top, bottomVal:g.bottom});
     showOverlay('<p>Menunggu jawaban lawan...</p>');
     renderAll();
@@ -563,17 +632,17 @@ function handleMessage(msg){
       G.guessStats[msg.side].count++;
       log(`[${msg.side==='p1'?'Merah':'Biru'}] menebak Atas ${msg.topVal} / Bawah ${msg.bottomVal}.`);
       if (correct){
-        send({type:'guessResult', side:msg.side, correct:true});
+        deliverGuessResult({side:msg.side, correct:true});
         endGame(msg.side, 'Bongkar Sandi Akurat — kartu rahasia berhasil ditebak.');
         return;
       }
       G.guessStats[msg.side].wrong++;
       if (G.guessStats[msg.side].wrong >= 2){
-        send({type:'guessResult', side:msg.side, correct:false, fatal:true});
+        deliverGuessResult({side:msg.side, correct:false, fatal:true});
         endGame(G.mySide, `Lawan salah tebak pada percobaan ke-2.`);
         return;
       }
-      send({type:'guessResult', side:msg.side, correct:false, fatal:false});
+      deliverGuessResult({side:msg.side, correct:false, fatal:false});
       log('Tebakan salah — lawan wajib mengorbankan 1 Penjaga.');
       renderAll();
       break;
@@ -582,15 +651,20 @@ function handleMessage(msg){
     case 'guessResult':
       hideOverlay();
       if (msg.correct){
-        endGame(G.mySide, 'Bongkar Sandi Akurat — kartu rahasia lawan berhasil ditebak.');
+        endGame(msg.side, msg.side===G.mySide ? 'Bongkar Sandi Akurat — kartu rahasia lawan berhasil ditebak.' : 'Lawan berhasil membongkar Kartu Sandi Anda.');
         return;
       }
       if (msg.fatal){
-        endGame(msg.side==='p1'?'p2':'p1', 'Anda salah tebak pada percobaan ke-2.');
+        endGame(msg.side==='p1'?'p2':'p1', msg.side===G.mySide ? 'Anda salah tebak pada percobaan ke-2.' : 'Lawan salah tebak pada percobaan ke-2.');
         return;
       }
-      log('Tebakan Anda salah. Pilih 1 Penjaga milik Anda untuk dikorbankan (Tumbal Penjaga).');
-      promptGuardSacrifice();
+      if (G.mode==='bot' && G.lastGuesser==='p2'){
+        log('Bot (Biru) salah tebak. Bot mengorbankan 1 Penjaga (Tumbal Penjaga).');
+        Bot.autoSacrifice();
+      } else {
+        log('Tebakan Anda salah. Pilih 1 Penjaga milik Anda untuk dikorbankan (Tumbal Penjaga).');
+        promptGuardSacrifice();
+      }
       break;
 
     case 'sacrifice':
@@ -647,11 +721,11 @@ function startRoundTransition(){
   document.getElementById('phaseTitle').textContent = 'Transisi Ronde';
   const box = document.getElementById('phaseControls');
   if (G.round === 1){
-    banner('Ronde 1 selesai! Pilih ulang kombinasi Sisi Bawah Anda (nilai tetap sama).');
-    box.innerHTML = '<div id="bottomRedrawUI"></div><button id="btnRoundReady" disabled>Siap Lanjut Ronde 2</button>';
-    renderBottomRedrawUI();
+    banner('Ronde 1 selesai! Pilih ulang kombinasi Sisi Atas Anda (nilai tetap sama, Sisi Bawah terkunci).');
+    box.innerHTML = '<div id="topRedrawUI"></div><button id="btnRoundReady" disabled>Siap Lanjut Ronde 2</button>';
+    renderTopRedrawUI();
     document.getElementById('btnRoundReady').onclick = () => {
-      G.myCard.bottomSplit = G.pendingBottomChoice;
+      G.myCard.topSplit = G.pendingTopChoice;
       G.roundReadyMe = true;
       document.getElementById('btnRoundReady').disabled = true;
       send({type:'roundReady'});
@@ -668,19 +742,27 @@ function startRoundTransition(){
     };
   } else {
     endGame('draw', 'Kuota Ronde 3 habis tanpa pemenang.');
+    return;
+  }
+  if (G.mode==='bot'){
+    setTimeout(()=>Bot.handleRoundTransition(), 400);
   }
 }
 
-function renderBottomRedrawUI(){
-  const div = document.getElementById('bottomRedrawUI');
-  div.innerHTML = `<b>Sisi Bawah (nilai tetap ${G.myCard.bottomVal})</b>`;
+function renderTopRedrawUI(){
+  const div = document.getElementById('topRedrawUI');
+  div.innerHTML = `<b>Sisi Atas (nilai tetap ${G.myCard.topVal})</b>`;
   const wrap = document.createElement('div'); wrap.className='split-options';
-  DB_BAWAH[G.myCard.bottomVal].forEach(raw=>{
+  const seen = new Set();
+  DB_ATAS[G.myCard.topVal].forEach(raw=>{
+    const final = applyBonus(raw, G.myCard.topVal).sort((a,b)=>a-b);
+    const key = final.join(',');
+    if (seen.has(key)) return; seen.add(key);
     const d = document.createElement('div');
     d.className = 'split-opt';
-    d.textContent = '[ '+raw.join(', ')+' ]';
+    d.textContent = '[ '+final.join(', ')+' ]';
     d.onclick = () => {
-      G.pendingBottomChoice = [...raw];
+      G.pendingTopChoice = final;
       document.getElementById('btnRoundReady').disabled = false;
       [...wrap.children].forEach(x=>x.classList.remove('chosen'));
       d.classList.add('chosen');
@@ -688,6 +770,7 @@ function renderBottomRedrawUI(){
     wrap.appendChild(d);
   });
   div.appendChild(wrap);
+  div.innerHTML += `<small class="hint" style="display:block;margin-top:6px;">Sisi Bawah Anda tetap [ ${G.myCard.bottomSplit.join(', ')} ] — tidak berubah.</small>`;
 }
 
 function checkBothRoundReady(){
@@ -759,6 +842,8 @@ function renderBoard(){
       const id = cellId(r,c);
       const div = document.createElement('div');
       div.className = 'cell zone-'+zoneOfRow(r);
+      const tSide = tunnelSideForCell(r,c);
+      if (tSide) div.classList.add('tunnel-'+tSide);
       div.id = 'cell-'+id;
       const coord = document.createElement('span'); coord.className='coord'; coord.textContent=id;
       div.appendChild(coord);

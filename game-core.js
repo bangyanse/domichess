@@ -82,6 +82,13 @@ function isValidKingDestination(side, targetRowIdx, targetColVal){
   }
 }
 
+// Tunnel (Koridor Tepi) helpers — dipakai untuk render visual & AI
+function tunnelSideForCell(r,c){
+  if (isValidKingDestination('p1', r, c)) return 'p1';
+  if (isValidKingDestination('p2', r, c)) return 'p2';
+  return null;
+}
+
 // Aura Penjaga: apakah cellId sedang diradiasi aura oleh Penjaga milik `side`
 function checkAuraBlockade(board, targetCell, side){
   const tr = rOf(targetCell), tc = cOf(targetCell);
@@ -152,6 +159,32 @@ function validateMove(board, side, srcCell, destCell){
   }
 
   return {ok:true, cost, isKingCapture};
+}
+
+// Enumerate all legal destinations for a piece at srcCell, cost between 1..maxSteps.
+// Returns [{dest, cost, isKingCapture}]
+function movesForPiece(board, side, srcCell, maxSteps){
+  const out = [];
+  const r0 = rOf(srcCell), c0 = cOf(srcCell);
+  for (let c=1;c<=6;c++){
+    if (c===c0) continue;
+    const dest = cellId(r0,c);
+    const cost = moveCost(srcCell, dest);
+    if (cost>=1 && cost<=maxSteps){
+      const chk = validateMove(board, side, srcCell, dest);
+      if (chk.ok) out.push({dest, cost, isKingCapture: !!chk.isKingCapture});
+    }
+  }
+  for (let r=0;r<7;r++){
+    if (r===r0) continue;
+    const dest = cellId(r,c0);
+    const cost = moveCost(srcCell, dest);
+    if (cost>=1 && cost<=maxSteps){
+      const chk = validateMove(board, side, srcCell, dest);
+      if (chk.ok) out.push({dest, cost, isKingCapture: !!chk.isKingCapture});
+    }
+  }
+  return out;
 }
 
 function pieceIcon(type){

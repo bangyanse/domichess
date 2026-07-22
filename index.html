@@ -7,22 +7,31 @@
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
   :root{
-    --red:#c0392b; --blue:#2e5aa8; --bg:#1b1f27; --panel:#242a35; --panel2:#2c3442;
-    --line:#3a4354; --gold:#e0b93d; --text:#eef1f6; --muted:#9aa4b5;
+    --red:#c0392b; --red-dim:#7d2b23; --blue:#2e5aa8; --blue-dim:#203f78;
+    --bg:#12151c; --bg2:#171b24; --panel:#1d2330; --panel2:#252c3c;
+    --line:#3a4457; --gold:#e0b93d; --gold-dim:#a8872a; --text:#eef1f6; --muted:#8b96ab;
   }
   *{box-sizing:border-box;}
   body{
-    margin:0; font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text);
+    margin:0; font-family:'Segoe UI',system-ui,sans-serif; color:var(--text);
     min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:16px;
+    background:
+      radial-gradient(circle at 15% 8%, rgba(46,90,168,.10), transparent 45%),
+      radial-gradient(circle at 85% 92%, rgba(192,57,43,.10), transparent 45%),
+      linear-gradient(var(--bg), var(--bg2));
+    background-attachment:fixed;
   }
-  h1{font-size:1.3rem; margin:6px 0 2px; letter-spacing:.5px;}
+  h1{font-size:1.45rem; margin:6px 0 2px; letter-spacing:.6px; font-weight:700;
+     text-shadow:0 0 18px rgba(224,185,61,.25);}
   h1 span{color:var(--gold);}
   .subtitle{color:var(--muted); font-size:.8rem; margin-bottom:14px;}
   .card{
-    background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px;
+    background:linear-gradient(180deg, var(--panel), var(--panel2));
+    border:1px solid var(--line); border-radius:12px; padding:18px;
     max-width:480px; width:100%; margin-bottom:14px;
+    box-shadow:0 4px 18px rgba(0,0,0,.28);
   }
-  .card h2{margin:0 0 10px; font-size:1rem; color:var(--gold);}
+  .card h2{margin:0 0 10px; font-size:1rem; color:var(--gold); letter-spacing:.3px;}
   input[type=text]{
     width:100%; padding:10px; border-radius:6px; border:1px solid var(--line);
     background:#161a21; color:var(--text); font-size:.95rem; margin:6px 0;
@@ -50,12 +59,15 @@
     gap:2px; background:var(--line); padding:2px; border-radius:8px;
   }
   .cell{
-    background:#10141a; display:flex; align-items:center; justify-content:center;
-    font-size:1.4rem; position:relative; cursor:default; border-radius:3px; user-select:none;
+    background:#0d1016; display:flex; align-items:center; justify-content:center;
+    font-size:1.4rem; position:relative; cursor:default; border-radius:4px; user-select:none;
+    transition:background .15s;
   }
-  .cell.zone-p1{background:#241417;}
-  .cell.zone-p2{background:#131c26;}
-  .cell.zone-neutral{background:#181a14;}
+  .cell.zone-p1{background:#231316;}
+  .cell.zone-p2{background:#111a24;}
+  .cell.zone-neutral{background:#171a13;}
+  .cell.tunnel-p1{background-image:repeating-linear-gradient(45deg, rgba(192,57,43,.20) 0 6px, transparent 6px 13px);}
+  .cell.tunnel-p2{background-image:repeating-linear-gradient(45deg, rgba(46,90,168,.20) 0 6px, transparent 6px 13px);}
   .cell.clickable{cursor:pointer; outline:2px solid transparent;}
   .cell.clickable:hover{outline-color:var(--gold);}
   .cell.selected{outline:3px solid var(--gold); background:rgba(224,185,61,.35); z-index:2;}
@@ -64,14 +76,19 @@
   .cell.aura-marker::after{
     content:''; position:absolute; inset:3px; border:2px dashed rgba(255,255,255,.25); border-radius:4px; pointer-events:none;
   }
+  @keyframes invalidPulse{
+    0%{ box-shadow: inset 0 0 0 3px rgba(192,57,43,.95); }
+    100%{ box-shadow: inset 0 0 0 3px rgba(192,57,43,0); }
+  }
+  .cell.invalid-flash{ animation: invalidPulse .55s ease-out; }
   .cell .coord{position:absolute; top:1px; left:3px; font-size:.55rem; color:#556; }
   .piece-p1, .piece-p2{
     display:flex; align-items:center; justify-content:center;
     width:36px; height:36px; border-radius:50%;
-    text-shadow:0 0 3px #000;
+    text-shadow:0 0 3px #000; transition:transform .12s;
   }
-  .piece-p1{background:rgba(192,57,43,.35); border:2px solid var(--red);}
-  .piece-p2{background:rgba(46,90,168,.35); border:2px solid var(--blue);}
+  .piece-p1{background:rgba(192,57,43,.35); border:2px solid var(--red); box-shadow:0 0 8px rgba(192,57,43,.25);}
+  .piece-p2{background:rgba(46,90,168,.35); border:2px solid var(--blue); box-shadow:0 0 8px rgba(46,90,168,.25);}
   #sidePanel{
     width:300px; display:flex; flex-direction:column; gap:12px;
   }
@@ -92,6 +109,15 @@
     font-size:.85rem; margin-bottom:10px; min-height:20px;
   }
   #statusBar{font-size:.75rem; color:var(--muted); margin-bottom:6px;}
+  #inlineWarn{
+    color:var(--red); font-size:.78rem; min-height:18px; margin:-2px 0 8px; opacity:0;
+    transition:opacity .3s; font-weight:600;
+  }
+  .legend{display:flex; gap:14px; flex-wrap:wrap; font-size:.7rem; color:var(--muted); margin-top:8px;}
+  .legend span{display:inline-flex; align-items:center; gap:5px;}
+  .legend i{width:14px; height:14px; border-radius:3px; display:inline-block;}
+  .legend i.tp1{background-image:repeating-linear-gradient(45deg, rgba(192,57,43,.6) 0 3px, #231316 3px 6px);}
+  .legend i.tp2{background-image:repeating-linear-gradient(45deg, rgba(46,90,168,.6) 0 3px, #111a24 3px 6px);}
   .split-options{display:flex; flex-direction:column; gap:6px; margin:8px 0;}
   .split-opt{
     background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:8px 10px;
@@ -115,17 +141,25 @@
 <div id="lobby">
   <div class="card">
     <h2>1. Buat Room (jadi Biru — pasang bidak duluan)</h2>
+    <input type="text" id="customRoomCode" placeholder="Kode room custom (opsional — kosongkan untuk acak)">
     <button id="btnHost">Buat Room Baru</button>
     <div id="hostCodeBox" style="display:none; margin-top:10px;">
       <div class="pill side-p2">Kode Room kamu:</div>
       <input type="text" id="hostCodeDisplay" readonly>
       <small class="hint">Kirim kode ini ke temanmu lewat chat manapun. Tunggu dia join.</small>
     </div>
+    <div id="hostErrorBox" style="display:none; color:var(--red); font-size:.8rem; margin-top:8px;"></div>
   </div>
   <div class="card">
     <h2>2. Gabung Room Teman (jadi Merah — jalan duluan Ronde 1)</h2>
     <input type="text" id="joinCodeInput" placeholder="Tempel kode room dari temanmu di sini">
     <button id="btnJoin">Gabung</button>
+    <div id="joinErrorBox" style="display:none; color:var(--red); font-size:.8rem; margin-top:8px;"></div>
+  </div>
+  <div class="card">
+    <h2>3. Latihan Lawan Bot (offline, jalan duluan sebagai Merah)</h2>
+    <p style="color:var(--muted); font-size:.8rem; margin:0 0 10px;">Bot bisa memasang bidak, bertahan, menyerang, dan melakukan Bongkar Kode berdasarkan deduksi Lembar Jejak.</p>
+    <button id="btnPlayBot" class="secondary">Main Lawan Bot</button>
   </div>
   <div id="connStatus" class="card" style="display:none;"></div>
 </div>
@@ -143,8 +177,15 @@
 <div id="gameArea">
   <div id="statusBar"></div>
   <div id="banner">Menunggu...</div>
+  <div id="inlineWarn"></div>
   <div class="layout">
-    <div id="board"></div>
+    <div>
+      <div id="board"></div>
+      <div class="legend">
+        <span><i class="tp1"></i> Tunnel Merah (jalur Raja)</span>
+        <span><i class="tp2"></i> Tunnel Biru (jalur Raja)</span>
+      </div>
+    </div>
     <div id="sidePanel">
       <div class="card" style="margin:0;">
         <h2 id="phaseTitle">Fase</h2>
@@ -174,6 +215,7 @@
 </div>
 
 <script src="game-core.js"></script>
+<script src="game-bot.js"></script>
 <script src="game-network.js"></script>
 </body>
 </html>
