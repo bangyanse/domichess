@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>The Hidden Code — PvP Online</title>
+<title>Epta: Kode Raja — PvP Online</title>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
   :root{
@@ -41,6 +41,7 @@
     font-size:.9rem; background:var(--gold); color:#1b1f27; margin:4px 4px 4px 0;
     transition:filter .15s;
   }
+  button svg{vertical-align:middle; margin-right:4px;}
   button:hover{filter:brightness(1.08);}
   button:disabled{opacity:.4; cursor:not-allowed;}
   button.secondary{background:var(--panel2); color:var(--text); border:1px solid var(--line);}
@@ -82,13 +83,20 @@
   }
   .cell.invalid-flash{ animation: invalidPulse .55s ease-out; }
   .cell .coord{position:absolute; top:1px; left:3px; font-size:.55rem; color:#556; }
-  .piece-p1, .piece-p2{
-    display:flex; align-items:center; justify-content:center;
-    width:36px; height:36px; border-radius:50%;
-    text-shadow:0 0 3px #000; transition:transform .12s;
+  .piece{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    width:40px; height:40px; position:relative; transition:transform .12s;
   }
-  .piece-p1{background:rgba(192,57,43,.35); border:2px solid var(--red); box-shadow:0 0 8px rgba(192,57,43,.25);}
-  .piece-p2{background:rgba(46,90,168,.35); border:2px solid var(--blue); box-shadow:0 0 8px rgba(46,90,168,.25);}
+  .piece .ico{font-size:1.15rem; line-height:1; text-shadow:0 0 4px #000;}
+  .piece .lbl{font-size:.48rem; font-weight:800; letter-spacing:.3px; margin-top:1px; opacity:.9; text-shadow:0 0 3px #000;}
+  .piece-p1{background:rgba(192,57,43,.32); border:2px solid var(--red); box-shadow:0 0 8px rgba(192,57,43,.3);}
+  .piece-p2{background:rgba(46,90,168,.32); border:2px solid var(--blue); box-shadow:0 0 8px rgba(46,90,168,.3);}
+  .piece.shape-K{border-radius:50%; border-width:3px; box-shadow:0 0 0 2px var(--gold), 0 0 10px rgba(224,185,61,.5);}
+  .piece.shape-SR{border-radius:8px; transform:rotate(45deg);}
+  .piece.shape-SR .ico, .piece.shape-SR .lbl{transform:rotate(-45deg);}
+  .piece.shape-PH, .piece.shape-PV{border-radius:6px;}
+  .piece.shape-PH{border-style:dashed;}
+  .piece.shape-PV{border-style:dashed;}
   #sidePanel{
     width:300px; display:flex; flex-direction:column; gap:12px;
   }
@@ -134,7 +142,7 @@
 </head>
 <body>
 
-<h1>DOMINO CHECKMATE — <span>THE HIDDEN CODE</span></h1>
+<h1>EPTA — <span>KODE RAJA</span></h1>
 <div class="subtitle">Versi PvP Online (P2P langsung, tanpa server) &middot; sesuai Buku Panduan Edisi Revisi</div>
 
 <!-- ===================== LOBBY ===================== -->
@@ -158,7 +166,7 @@
   </div>
   <div class="card">
     <h2>3. Latihan Lawan Bot (offline, jalan duluan sebagai Merah)</h2>
-    <p style="color:var(--muted); font-size:.8rem; margin:0 0 10px;">Bot bisa memasang bidak, bertahan, menyerang, dan melakukan Bongkar Kode berdasarkan deduksi Lembar Jejak.</p>
+    <p style="color:var(--muted); font-size:.8rem; margin:0 0 10px;">Bot bisa memasang bidak, bertahan, menyerang, dan melakukan Bongkar Kode berdasarkan deduksi Catatan Perang.</p>
     <button id="btnPlayBot" class="secondary">Main Lawan Bot</button>
   </div>
   <div id="connStatus" class="card" style="display:none;"></div>
@@ -166,10 +174,10 @@
 
 <!-- ===================== CARD SELECTION ===================== -->
 <div id="cardSelectArea" class="card" style="display:none; max-width:560px;">
-  <h2>Pilih Kartu Sandi (Rahasia — lawan tidak akan lihat ini)</h2>
+  <h2>Pilih Kartu Domino (Rahasia — lawan tidak akan lihat ini)</h2>
   <div id="topSelectUI"></div>
   <div id="bottomSelectUI"></div>
-  <button id="btnLockCard" disabled>Kunci Kartu Sandi</button>
+  <button id="btnLockCard" disabled>Kunci Kartu Domino</button>
   <div id="cardReadyStatus" style="margin-top:8px; font-size:.8rem; color:var(--muted);"></div>
 </div>
 
@@ -192,18 +200,18 @@
         <div id="phaseControls"></div>
       </div>
       <div class="card" style="margin:0;">
-        <h2>Pool Energi Saya</h2>
+        <h2>Cadangan Taktis Saya</h2>
         <div id="poolPanel"></div>
         <div class="row" style="margin-top:8px;">
-          <button id="btnGuessOpen" class="secondary">Aksi Bongkar Sandi 🔍</button>
+          <button id="btnGuessOpen" class="secondary">Bongkar Kode 🔍</button>
         </div>
         <small class="hint" id="guessQuotaHint"></small>
       </div>
       <div class="card" style="margin:0;">
-        <h2>Lembar Jejak Publik</h2>
+        <h2>Catatan Perang</h2>
         <div id="tracePanel" style="font-family:monospace; font-size:.95rem; line-height:1.9; margin-bottom:8px;"></div>
         <div style="border-top:1px solid var(--line); margin:6px 0 8px; opacity:.5;"></div>
-        <small class="hint" style="margin-bottom:4px; display:block;">Riwayat Aksi</small>
+        <small class="hint" style="margin-bottom:4px; display:block;">Riwayat Operasi</small>
         <div id="logPanel"></div>
       </div>
     </div>

@@ -6,13 +6,20 @@
    jadi aksi bot cukup memanggil handleMessage()/advanceTurn() langsung,
    persis seolah pesan itu datang dari jaringan.
 
-   Catatan desain (biar ekspektasi jelas):
-   - Bot memakai SATU nilai Poin Gerak untuk SATU bidak per giliran (belum
-     mendukung split otomatis 1 nilai ke banyak bidak seperti yang boleh
-     dilakukan manusia). Ini simplifikasi, bukan pelanggaran aturan.
-   - Deduksi kartu lawan dihitung ulang tiap ronde dari Lembar Jejak publik
-     Merah, dan diperketat (interseksi) lintas ronde karena Sisi Bawah tidak
-     pernah berubah sepanjang game.
+   Perilaku bot:
+   1. Bertahan  — mendeteksi ancaman Panglima lawan ke Raja sendiri (segaris,
+      jarak <=4, lintasan bersih) dan memprioritaskan menghalangi lintasan
+      atau memindah Raja keluar dari segaris, di atas semua pertimbangan lain.
+   2. Menyerang — mendekatkan & mensejajarkan Panglima ke Raja lawan, dengan
+      bonus ekstra kalau lintasan tembak sudah bersih (siap eksekusi giliran
+      berikutnya).
+   3. Bongkar Kode — deduksi dari Catatan Perang Merah tiap ronde, dipersempit
+      lintas ronde. Menebak pasti kalau kandidat tinggal 1; kalau tinggal 2 dan
+      masih py 2 kesempatan tebak, mengambil risiko terukur di akhir ronde.
+   4. Wajib bergerak — begitu 1 Jatah Gerak dipilih, bot WAJIB memakainya utk
+      melangkah (dicarikan gerakan pelengkap kalau nilainya tak habis oleh 1
+      bidak saja), kecuali dipakai utk Bongkar Kode. Bot tidak pernah
+      "melewati" gilirannya begitu saja.
    ========================================================================= */
 
 const Bot = {
@@ -33,7 +40,7 @@ const Bot = {
     this.poolRound = 1;
     this.possiblePairs = new Set(this.ALL_PAIRS());
     this.roundStartTraceLen = 0;
-    G.peerReadyCard = true; // bot langsung "siap"; giliran manusia mengunci kartunya sendiri
+    G.peerReadyCard = true; // bot langsung "siap"; giliran manusia mengunci Kartu Domino-nya sendiri
   },
 
   pickCard(){
@@ -46,10 +53,8 @@ const Bot = {
     };
     const topVal = weightedVal();
     const bottomVal = weightedVal();
-    const topRaw = DB_ATAS[topVal][Math.floor(Math.random()*DB_ATAS[topVal].length)];
-    const topSplit = applyBonus(topRaw, topVal);
-    const bottomRaw = DB_BAWAH[bottomVal][Math.floor(Math.random()*DB_BAWAH[bottomVal].length)];
-    const bottomSplit = [...bottomRaw];
+    const topSplit = [...DB_ATAS[topVal][Math.floor(Math.random()*DB_ATAS[topVal].length)]];
+    const bottomSplit = [...DB_BAWAH[bottomVal][Math.floor(Math.random()*DB_BAWAH[bottomVal].length)]];
     this.card = { topVal, topSplit, bottomVal, bottomSplit };
     this.pool = [...topSplit, ...bottomSplit].map(v=>({value:v, used:false}));
   },
@@ -58,7 +63,7 @@ const Bot = {
   onHumanMessage(msg){
     if (msg.type !== 'guess') return; // place/move/advanceTurn/sacrifice/cardReady/roundReady: bot urus sendiri
     const correct = msg.topVal===this.card.topVal && msg.bottomVal===this.card.bottomVal;
-    log(`[Biru/Bot] menerima Aksi Bongkar Sandi Anda: Atas ${msg.topVal} / Bawah ${msg.bottomVal}.`);
+    log(`[Biru/Bot] menerima Bongkar Kode Anda: Atas ${msg.topVal} / Bawah ${msg.bottomVal}.`);
     if (correct){ handleMessage({type:'guessResult', side:msg.side, correct:true}); return; }
     G.guessStats[msg.side].wrong = (G.guessStats[msg.side].wrong||0) + 1;
     if (G.guessStats[msg.side].wrong >= 2){
@@ -89,7 +94,7 @@ const Bot = {
       const candidates = shuffle([cellId(5,2),cellId(5,3),cellId(5,4),cellId(5,5),cellId(4,3),cellId(4,4)]);
       for (const cell of candidates) if (isEmpty(cell)) return cell;
     }
-    // Penjaga (PH/PV): sebar di dekat Raja untuk memperluas Zona Blokade pelindung
+    // Penjaga (Sayap/Poros): sebar di dekat Raja untuk memperluas Zona Blokade pelindung
     const kingEntry = Object.entries(G.boardPieces).find(([c,p])=>p.side==='p2'&&p.type==='K');
     const preferred = [];
     if (kingEntry){
@@ -102,7 +107,7 @@ const Bot = {
     return null;
   },
 
-  // ---------------- deduksi kartu lawan dari Lembar Jejak publik ----------------
+  // ---------------- deduksi kartu lawan dari Catatan Perang ----------------
   onPlayerMoved(){
     this.updateDeduction();
   },
@@ -125,7 +130,7 @@ const Bot = {
   },
 
   pairConsistentWithCounts(topVal, bottomVal, counts){
-    const topVariants = uniqueFinalSplits(DB_ATAS[topVal], topVal);
+    const topVariants = uniqueFinalSplits(DB_ATAS[topVal]);
     const bottomVariants = DB_BAWAH[bottomVal];
     for (const tv of topVariants){
       for (const bv of bottomVariants){
@@ -141,15 +146,22 @@ const Bot = {
   },
 
   getGuessIfConfident(){
-    if (!this.possiblePairs || this.possiblePairs.size !== 1) return null;
-    if ((G.guessStats.p2.count||0) >= 2) return null;
-    return [...this.possiblePairs][0];
+    if (!this.possiblePairs) return null;
+    const attemptsLeft = 2 - (G.guessStats.p2.count||0);
+    if (attemptsLeft <= 0) return null;
+    if (this.possiblePairs.size === 1) return [...this.possiblePairs][0];
+    // Risiko terukur: kandidat tinggal 2, masih py kedua kesempatan tebak, & ronde mulai menipis.
+    if (this.possiblePairs.size === 2 && attemptsLeft === 2 && G.turnsLeft.p2 <= 3){
+      const arr = [...this.possiblePairs];
+      return arr[Math.floor(Math.random()*arr.length)];
+    }
+    return null;
   },
 
   // ---------------- transisi ronde ----------------
   handleRoundTransition(){
     if (G.round === 1){
-      const options = uniqueFinalSplits(DB_ATAS[this.card.topVal], this.card.topVal);
+      const options = uniqueFinalSplits(DB_ATAS[this.card.topVal]);
       this.card.topSplit = options[Math.floor(Math.random()*options.length)];
     }
     G.roundReadyPeer = true;
@@ -164,6 +176,24 @@ const Bot = {
     }
   },
 
+  // ---------------- ancaman terhadap Raja sendiri ----------------
+  // Mengembalikan {attackerCell, kingCell} kalau Raja Biru sedang segaris & terjangkau
+  // Panglima Merah (jarak <=4, lintasan bersih dari bidak lain).
+  findThreatToOwnKing(){
+    const ownKingEntry = Object.entries(G.boardPieces).find(([c,p])=>p.side==='p2'&&p.type==='K');
+    if (!ownKingEntry) return null;
+    const kCell = ownKingEntry[0];
+    const enemyAttackers = Object.entries(G.boardPieces).filter(([c,p])=>p.side==='p1'&&p.type==='SR');
+    for (const [ac] of enemyAttackers){
+      if (rOf(ac)===rOf(kCell) || cOf(ac)===cOf(kCell)){
+        if (manhattan(ac,kCell) <= 4 && !isPathBlockedByAnyPiece(G.boardPieces, ac, kCell)){
+          return { attackerCell: ac, kingCell: kCell };
+        }
+      }
+    }
+    return null;
+  },
+
   // ---------------- giliran bertempur ----------------
   takeBattleTurn(){
     if (G.phase!=='battle' || G.activeSide!=='p2') return;
@@ -176,41 +206,69 @@ const Bot = {
       G.pendingBotGuessValue = this.pool[freeIdx].value;
       G.lastGuesser = 'p2';
       const [tv,bv] = guessPair.split('-').map(Number);
-      log(`[Biru/Bot] melakukan Aksi Bongkar Sandi: menebak Atas ${tv} / Bawah ${bv}.`);
+      log(`[Biru/Bot] melakukan Bongkar Kode: menebak Atas ${tv} / Bawah ${bv}.`);
       handleMessage({type:'guess', side:'p2', topVal:tv, bottomVal:bv});
       return;
     }
 
-    const choice = this.chooseBestMove();
-    if (!choice){
+    this.executeBestAvailableMove();
+  },
+
+  // Menjamin bidak benar-benar bergerak selama nilai Jatah Gerak masih ada yang belum
+  // dipakai dan papan memungkinkan — mencari gerakan pelengkap kalau nilai pertama
+  // tak habis dipakai 1 bidak, alih-alih melewatkan sisa nilainya.
+  executeBestAvailableMove(){
+    const threat = this.findThreatToOwnKing();
+    const first = this.chooseBestMove(threat);
+    if (!first){
+      // Benar-benar tidak ada gerakan legal untuk nilai manapun (kasus ekstrem/nyaris mustahil).
+      const freeIdx = this.pool.findIndex(s=>!s.used);
       if (freeIdx>=0){
         this.pool[freeIdx].used = true;
+        log('[Biru/Bot] tidak menemukan gerakan legal sama sekali — Jatah Gerak tetap dianggap terpakai.');
         advanceTurn('p2', this.pool[freeIdx].value);
       } else {
         advanceTurn('p2', null);
       }
       return;
     }
-    this.pool[choice.poolIdx].used = true;
-    handleMessage({type:'move', side:'p2', src:choice.src, dest:choice.dest});
+    this.pool[first.poolIdx].used = true;
+    handleMessage({type:'move', side:'p2', src:first.src, dest:first.dest});
     if (G.gameEnded) return;
-    advanceTurn('p2', choice.value);
-  },
 
-  autoSacrifice(){
-    const guards = Object.entries(G.boardPieces).filter(([c,p])=>p.side==='p2' && (p.type==='PH'||p.type==='PV'));
-    if (guards.length){
-      const [cell,p] = guards[Math.floor(Math.random()*guards.length)];
-      delete G.boardPieces[cell];
-      log(`[Tumbal Penjaga] Bot (Biru) kehilangan ${pieceName(p.type)} di ${cell}.`);
-      renderBoard();
+    let leftover = first.value - first.cost;
+    if (leftover > 0){
+      // Cari gerakan pelengkap (bidak lain) untuk menghabiskan sisa nilai Jatah Gerak ini.
+      const second = this.findMoveForBudget(leftover, this.findThreatToOwnKing(), first.dest);
+      if (second){
+        handleMessage({type:'move', side:'p2', src:second.src, dest:second.dest});
+        if (G.gameEnded) return;
+      }
     }
-    const usedValue = G.pendingBotGuessValue;
-    G.pendingBotGuessValue = null;
-    advanceTurn('p2', usedValue);
+    advanceTurn('p2', first.value);
   },
 
-  chooseBestMove(){
+  // Cari gerakan terbaik untuk SISA langkah (leftover) dari Jatah Gerak yang sedang
+  // dipakai — tidak menyentuh bookkeeping Cadangan Taktis (this.pool), karena nilainya
+  // sama, cuma dibagi ke bidak berbeda dalam Operasi yang sama.
+  findMoveForBudget(maxSteps, threat, excludeSrc){
+    const enemyKingEntry = Object.entries(G.boardPieces).find(([c,p])=>p.side==='p1'&&p.type==='K');
+    const ownKingEntry = Object.entries(G.boardPieces).find(([c,p])=>p.side==='p2'&&p.type==='K');
+    const ownPieces = Object.entries(G.boardPieces).filter(([c,p])=>p.side==='p2' && c!==excludeSrc);
+    let best = null;
+    ownPieces.forEach(([cell,piece])=>{
+      const moves = movesForPiece(G.boardPieces, 'p2', cell, maxSteps);
+      moves.forEach(m=>{
+        const score = this.scoreMove(cell, piece, m, enemyKingEntry, ownKingEntry, threat);
+        if (!best || score > best.score) best = { src:cell, dest:m.dest, cost:m.cost, score };
+      });
+    });
+    return best;
+  },
+
+  // excludeSrc: kalau dipanggil sbg gerakan pelengkap, hindari memakai src yang sama persis
+  // (bidak yang baru saja dipindah) supaya tidak menghitung ulang dari posisi lama.
+  chooseBestMove(threat){
     const enemyKingEntry = Object.entries(G.boardPieces).find(([c,p])=>p.side==='p1'&&p.type==='K');
     const ownKingEntry = Object.entries(G.boardPieces).find(([c,p])=>p.side==='p2'&&p.type==='K');
     const ownPieces = Object.entries(G.boardPieces).filter(([c,p])=>p.side==='p2');
@@ -220,9 +278,9 @@ const Bot = {
       ownPieces.forEach(([cell,piece])=>{
         const moves = movesForPiece(G.boardPieces, 'p2', cell, slot.value);
         moves.forEach(m=>{
-          const score = this.scoreMove(cell, piece, m, enemyKingEntry, ownKingEntry);
+          const score = this.scoreMove(cell, piece, m, enemyKingEntry, ownKingEntry, threat);
           if (!best || score > best.score){
-            best = { src:cell, dest:m.dest, poolIdx:idx, value:slot.value, score, isKingCapture:m.isKingCapture };
+            best = { src:cell, dest:m.dest, poolIdx:idx, value:slot.value, cost:m.cost, score, isKingCapture:m.isKingCapture };
           }
         });
       });
@@ -230,22 +288,42 @@ const Bot = {
     return best;
   },
 
-  scoreMove(src, piece, move, enemyKingEntry, ownKingEntry){
-    if (move.isKingCapture) return 1e6;
+  scoreMove(src, piece, move, enemyKingEntry, ownKingEntry, threat){
+    if (move.isKingCapture) return 1e7;
     let score = Math.random()*3; // jitter kecil biar variatif antar game
-    const captured = G.boardPieces[move.dest];
-    if (captured && captured.side==='p1') score += 60;
 
+    // --- Bertahan: prioritas mutlak kalau Raja sendiri sedang terancam ---
+    if (threat){
+      const blocksPath = isBetweenOnLine(threat.attackerCell, move.dest, threat.kingCell);
+      if (blocksPath) score += 800; // menghalangi lintasan serangan
+      if (piece.type==='K'){
+        const stillAligned = (rOf(move.dest)===rOf(threat.attackerCell) || cOf(move.dest)===cOf(threat.attackerCell))
+          && !isPathBlockedByAnyPiece({...G.boardPieces, [move.dest]:piece}, threat.attackerCell, move.dest);
+        if (!stillAligned) score += 700; // Raja kabur dari garis tembak
+      }
+    }
+
+    // --- Menyerang: dekatkan & sejajarkan Panglima ke Raja lawan ---
     if (piece.type==='SR' && enemyKingEntry){
       const kCell = enemyKingEntry[0];
       const dBefore = manhattan(src, kCell);
       const dAfter = manhattan(move.dest, kCell);
-      score += (dBefore-dAfter)*12;
-      if (rOf(move.dest)===rOf(kCell) || cOf(move.dest)===cOf(kCell)) score += 15;
+      score += (dBefore-dAfter)*14;
+      const aligned = rOf(move.dest)===rOf(kCell) || cOf(move.dest)===cOf(kCell);
+      if (aligned){
+        score += 20;
+        // Bonus lebih besar kalau lintasan tembak ke Raja lawan sudah bersih (siap dieksekusi giliran depan)
+        const boardAfter = {...G.boardPieces}; delete boardAfter[src]; boardAfter[move.dest] = piece;
+        if (!isPathBlockedByAnyPiece(boardAfter, move.dest, kCell) && !checkAuraBlockade(boardAfter, kCell, 'p1')){
+          score += 45;
+        }
+      }
     }
-    if (piece.type==='K' && ownKingEntry){
+    // --- Raja: hindari posisi berbahaya kalau belum terancam langsung ---
+    if (piece.type==='K' && ownKingEntry && !threat){
       score -= this.kingDangerScore(move.dest);
     }
+    // --- Penjaga: condong menjaga area dekat Raja sendiri ---
     if ((piece.type==='PH'||piece.type==='PV') && ownKingEntry){
       const dNow = manhattan(move.dest, ownKingEntry[0]);
       score += Math.max(0, 6-dNow);
@@ -261,6 +339,19 @@ const Bot = {
     });
     return danger;
   },
+
+  autoSacrifice(){
+    const guards = Object.entries(G.boardPieces).filter(([c,p])=>p.side==='p2' && (p.type==='PH'||p.type==='PV'));
+    if (guards.length){
+      const [cell,p] = guards[Math.floor(Math.random()*guards.length)];
+      delete G.boardPieces[cell];
+      log(`[Tumbal Penjaga] Bot (Biru) kehilangan ${pieceName(p.type)} di ${cell}.`);
+      renderBoard();
+    }
+    const usedValue = G.pendingBotGuessValue;
+    G.pendingBotGuessValue = null;
+    advanceTurn('p2', usedValue);
+  },
 };
 
 function shuffle(arr){
@@ -274,10 +365,22 @@ function shuffle(arr){
 function manhattan(cellA, cellB){
   return Math.abs(rOf(cellA)-rOf(cellB)) + Math.abs(cOf(cellA)-cOf(cellB));
 }
-function uniqueFinalSplits(rawOptions, val){
+function isBetweenOnLine(a, mid, b){
+  const ra=rOf(a), ca=cOf(a), rm=rOf(mid), cm=cOf(mid), rb=rOf(b), cb=cOf(b);
+  if (ra===rb){
+    if (rm!==ra) return false;
+    return (cm>Math.min(ca,cb) && cm<Math.max(ca,cb));
+  }
+  if (ca===cb){
+    if (cm!==ca) return false;
+    return (rm>Math.min(ra,rb) && rm<Math.max(ra,rb));
+  }
+  return false;
+}
+function uniqueFinalSplits(rawOptions){
   const seen = new Set(); const out = [];
   rawOptions.forEach(raw=>{
-    const final = applyBonus(raw, val).sort((a,b)=>a-b);
+    const final = [...raw].sort((a,b)=>a-b);
     const key = final.join(',');
     if (!seen.has(key)){ seen.add(key); out.push(final); }
   });

@@ -1,32 +1,24 @@
 'use strict';
 /* =========================================================================
-   THE HIDDEN CODE — PvP core game logic
-   Implements the finalized ruleset from "Buku Panduan Aturan Resmi — Edisi Revisi"
+   EPTA — KODE RAJA — core game logic
+   Implements the finalized ruleset from "Buku Panduan Aturan Resmi & Mekanik
+   Permainan" (Epta: Kode Raja).
    ========================================================================= */
 
 const ROWS = ['A','B','C','D','E','F','G'];
 
+// Tabel Referensi Jatah Gerak (Bab VI.3) — nilai final, sesuai booklet persis.
+// Atas: total tiap kombinasi = 2 x Nilai Sisi Atas. Bawah: total = Nilai Sisi Bawah.
 const DB_ATAS = {
-  4: [[1,1,2,4],[1,1,3,3],[1,2,2,3],[2,2,2,2]],
-  5: [[1,1,4,4],[1,2,3,4],[1,3,3,3],[2,2,2,4],[2,2,3,3]],
-  6: [[1,3,4,4],[2,2,4,4],[2,3,3,4],[3,3,3,3]],
+  4: [[4,2,1,1],[3,3,1,1],[3,2,2,1],[2,2,2,2]],
+  5: [[4,4,1,1],[4,3,2,1],[3,3,3,1],[4,2,2,2],[3,3,2,2]],
+  6: [[4,4,3,1],[4,4,2,2],[4,3,3,2],[3,3,3,3]],
 };
 const DB_BAWAH = {
-  4: [[1,1,2]],
-  5: [[1,1,3],[1,2,2]],
-  6: [[1,1,4],[1,2,3],[2,2,2]],
+  4: [[2,1,1]],
+  5: [[3,1,1],[2,2,1]],
+  6: [[4,1,1],[3,2,1],[2,2,2]],
 };
-
-function applyBonus(splitArr, topVal){
-  let bonus = topVal===4?2:topVal===5?1:0;
-  let temp = [...splitArr];
-  while(bonus>0){
-    let added=false;
-    for(let i=0;i<temp.length;i++){ if(temp[i]<4){temp[i]++;bonus--;added=true;break;} }
-    if(!added) break;
-  }
-  return temp;
-}
 
 function cellId(r,c){ return `${ROWS[r]}${c}`; }
 function rOf(cell){ return ROWS.indexOf(cell[0]); }
@@ -68,7 +60,7 @@ function moveCost(src,dest){
   return Math.abs(rEnd-rStart) + Math.abs(cEnd-cStart);
 }
 
-// Koridor Tepi: Raja bebas horizontal di baris ujung sendiri,
+// Tunnel: Raja bebas horizontal di baris ujung sendiri,
 // atau vertikal di Kolom 1/6 hingga batas area pertahanan sendiri (C untuk p1, E untuk p2).
 function isValidKingDestination(side, targetRowIdx, targetColVal){
   if (side==='p1'){
@@ -82,14 +74,14 @@ function isValidKingDestination(side, targetRowIdx, targetColVal){
   }
 }
 
-// Tunnel (Koridor Tepi) helpers — dipakai untuk render visual & AI
+// Tunnel helpers — dipakai untuk render visual & AI
 function tunnelSideForCell(r,c){
   if (isValidKingDestination('p1', r, c)) return 'p1';
   if (isValidKingDestination('p2', r, c)) return 'p2';
   return null;
 }
 
-// Aura Penjaga: apakah cellId sedang diradiasi aura oleh Penjaga milik `side`
+// Zona Blokade: apakah cellId sedang diradiasi Zona Blokade oleh Penjaga milik `side`
 function checkAuraBlockade(board, targetCell, side){
   const tr = rOf(targetCell), tc = cOf(targetCell);
   for (const key in board){
@@ -124,7 +116,7 @@ function validateMove(board, side, srcCell, destCell){
 
   const rEnd = rOf(destCell), cEnd = cOf(destCell);
   if (piece.type==='K' && !isValidKingDestination(side, rEnd, cEnd)){
-    return {ok:false, reason:'Raja hanya boleh bergerak di Koridor Tepi (baris ujung / kolom 1 & 6 s.d. batas pertahanan).'};
+    return {ok:false, reason:'Raja hanya boleh bergerak di Tunnel (baris ujung / kolom 1 & 6 s.d. batas pertahanan).'};
   }
 
   if (isPathBlockedByAnyPiece(board, srcCell, destCell)){
@@ -138,14 +130,14 @@ function validateMove(board, side, srcCell, destCell){
   const pathCells = getPathCells(srcCell, destCell);
   for (const pc of pathCells){
     if (checkAuraBlockade(board, pc, enemy)){
-      if (pc===destCell && isKingCapture) continue; // pengecualian: Penyerang memakan Raja
-      return {ok:false, reason:`Terblokir Aura Penjaga lawan di ${pc}.`};
+      if (pc===destCell && isKingCapture) continue; // pengecualian: Panglima memakan Raja
+      return {ok:false, reason:`Terblokir Zona Blokade lawan di ${pc}.`};
     }
   }
 
   if (destPiece){
     if (destPiece.side===side) return {ok:false, reason:'Petak tujuan sudah ditempati bidak sendiri.'};
-    if (!isKingCapture) return {ok:false, reason:'Hanya Penyerang yang boleh menempati petak lawan, dan hanya untuk memakan Raja.'};
+    if (!isKingCapture) return {ok:false, reason:'Hanya Panglima yang boleh menempati petak lawan, dan hanya untuk mengeliminasi Raja.'};
   }
 
   if (piece.type==='PH' || piece.type==='PV'){
@@ -187,9 +179,34 @@ function movesForPiece(board, side, srcCell, maxSteps){
   return out;
 }
 
+// Ikon SVG minimalis per bidak (bukan emoji, biar konsisten di semua perangkat/browser)
 function pieceIcon(type){
-  return { K:'👑', PH:'↔️', PV:'↕️', SR:'⚔️' }[type] || '?';
+  const icons = {
+    K: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 18h16M4 18l-1.3-9.5L7.5 12l4.5-7.5 4.5 7.5 4.8-3.5L20 18"/>
+          <circle cx="4" cy="8" r="1.3" fill="currentColor" stroke="none"/>
+          <circle cx="12" cy="4" r="1.3" fill="currentColor" stroke="none"/>
+          <circle cx="20" cy="8" r="1.3" fill="currentColor" stroke="none"/>
+        </svg>`,
+    SR: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="3" x2="12" y2="16"/>
+          <path d="M12 3l-2.3 2.3M12 3l2.3 2.3"/>
+          <line x1="6.5" y1="9" x2="17.5" y2="9"/>
+          <path d="M12 16l-2.1 3.2h4.2L12 16z" fill="currentColor" stroke="none"/>
+        </svg>`,
+    PV: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="3" x2="12" y2="21"/>
+          <path d="M12 3l-3.2 3.2M12 3l3.2 3.2"/>
+          <path d="M12 21l-3.2-3.2M12 21l3.2-3.2"/>
+        </svg>`,
+    PH: `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="3" y1="12" x2="21" y2="12"/>
+          <path d="M3 12l3.2-3.2M3 12l3.2 3.2"/>
+          <path d="M21 12l-3.2-3.2M21 12l-3.2 3.2"/>
+        </svg>`,
+  };
+  return icons[type] || '?';
 }
 function pieceName(type){
-  return { K:'Raja', PH:'Penjaga Horizontal', PV:'Penjaga Vertikal', SR:'Penyerang' }[type] || type;
+  return { K:'Raja', PH:'Penjaga Sayap', PV:'Penjaga Poros', SR:'Panglima' }[type] || type;
 }

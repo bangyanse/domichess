@@ -1,6 +1,6 @@
 'use strict';
 /* =========================================================================
-   THE HIDDEN CODE — PvP networking (PeerJS, P2P, no server) + UI wiring
+   EPTA — KODE RAJA — PvP networking (PeerJS, P2P, no server) + UI wiring
    ========================================================================= */
 
 const G = {
@@ -49,7 +49,7 @@ function banner(text){ document.getElementById('banner').textContent = text; }
 function statusBar(){
   const sideLabel = G.mySide==='p1' ? 'Merah' : 'Biru';
   document.getElementById('statusBar').textContent =
-    `Kamu: ${sideLabel} · Ronde ${G.round} · Giliran tersisa — Merah:${G.turnsLeft.p1} Biru:${G.turnsLeft.p2}`;
+    `Kamu: ${sideLabel} · Ronde ${G.round} · Jatah Operasi tersisa — Merah:${G.turnsLeft.p1} Biru:${G.turnsLeft.p2}`;
 }
 function send(msg){
   if (G.mode === 'bot'){ Bot.onHumanMessage(msg); return; }
@@ -207,7 +207,7 @@ document.getElementById('btnHost').onclick = async () => {
     G.conn = c;
     wireConn();
     document.getElementById('connStatus').style.display='block';
-    document.getElementById('connStatus').textContent = 'Teman terhubung! Menyiapkan Kartu Sandi...';
+    document.getElementById('connStatus').textContent = 'Teman terhubung! Menyiapkan Kartu Domino...';
     attachIceDiagnostics(c);
     startCardSelectPhase();
   });
@@ -263,7 +263,7 @@ document.getElementById('btnPlayBot').onclick = () => {
 function wireConn(guard){
   G.conn.on('open', () => {
     if (guard) clearTimeout(guard);
-    document.getElementById('connStatus').textContent = 'Terhubung! Menyiapkan Kartu Sandi...';
+    document.getElementById('connStatus').textContent = 'Terhubung! Menyiapkan Kartu Domino...';
     startCardSelectPhase();
   });
   G.conn.on('data', handleMessage);
@@ -288,7 +288,7 @@ let cardDraft = { topVal:null, topSplit:null, bottomVal:null, bottomSplit:null }
 
 function renderCardSelectUI(){
   const topDiv = document.getElementById('topSelectUI');
-  topDiv.innerHTML = '<b>Sisi Atas</b> (menentukan 4 Poin Gerak + bonus)';
+  topDiv.innerHTML = '<b>Sisi Atas</b> (menentukan 4 Jatah Gerak)';
   const rowTop = document.createElement('div'); rowTop.className='row'; rowTop.style.margin='6px 0';
   [4,5,6].forEach(v=>{
     const b=document.createElement('button'); b.className='secondary'; b.textContent='Sisi Atas '+v;
@@ -301,7 +301,7 @@ function renderCardSelectUI(){
     const optWrap = document.createElement('div'); optWrap.className='split-options';
     const seen = new Set();
     DB_ATAS[cardDraft.topVal].forEach(raw=>{
-      const final = applyBonus(raw, cardDraft.topVal).sort((a,b)=>a-b);
+      const final = [...raw].sort((a,b)=>a-b);
       const key = final.join(',');
       if (seen.has(key)) return; seen.add(key);
       const d = document.createElement('div');
@@ -314,7 +314,7 @@ function renderCardSelectUI(){
   }
 
   const botDiv = document.getElementById('bottomSelectUI');
-  botDiv.innerHTML = '<b>Sisi Bawah</b> (menentukan 3 Poin Gerak)';
+  botDiv.innerHTML = '<b>Sisi Bawah</b> (menentukan 3 Jatah Gerak)';
   const rowBot = document.createElement('div'); rowBot.className='row'; rowBot.style.margin='6px 0';
   [4,5,6].forEach(v=>{
     const b=document.createElement('button'); b.className='secondary'; b.textContent='Sisi Bawah '+v;
@@ -344,7 +344,7 @@ document.getElementById('btnLockCard').onclick = () => {
   G.myPool = [...cardDraft.topSplit, ...cardDraft.bottomSplit].map(v=>({value:v, used:false}));
   G.myReadyCard = true;
   document.getElementById('btnLockCard').disabled = true;
-  document.getElementById('cardReadyStatus').textContent = 'Kartu Sandi dikunci. Menunggu lawan...';
+  document.getElementById('cardReadyStatus').textContent = 'Kartu Domino dikunci. Menunggu lawan...';
   send({type:'cardReady'});
   checkBothCardReady();
 };
@@ -389,7 +389,7 @@ function renderPlacementControls(){
   const row = document.createElement('div'); row.className='row';
   availableNow.forEach(t=>{
     const b = document.createElement('button');
-    b.textContent = pieceIcon(t)+' '+pieceName(t);
+    b.innerHTML = pieceIcon(t)+' '+pieceName(t);
     if (G.armedPlaceType===t) b.classList.add('active'); else b.className='secondary';
     b.onclick = ()=>{ G.armedPlaceType=t; renderPlacementControls(); };
     row.appendChild(b);
@@ -455,7 +455,7 @@ function renderPool(){
     panel.appendChild(b);
   });
   const q = 2 - G.guessStats[G.mySide].count;
-  document.getElementById('guessQuotaHint').textContent = `Sisa jatah Aksi Bongkar Sandi: ${q}/2.`;
+  document.getElementById('guessQuotaHint').textContent = `Sisa jatah Bongkar Kode: ${q}/2.`;
 }
 
 function renderBattleControls(){
@@ -468,11 +468,11 @@ function renderBattleControls(){
     banner(`Menunggu giliran ${G.activeSide==='p1'?'Merah':'Biru'}...`);
     box.innerHTML = '<small class="hint">Bukan giliran Anda.</small>';
   } else if (G.remainingSteps>0){
-    banner(`Poin Gerak ${G.myPool[G.activePoolIdx].value} aktif (sisa ${G.remainingSteps}). Klik bidak Anda lalu klik petak tujuan — atau lakukan Aksi Bongkar Sandi untuk mengorbankan Poin Gerak ini.`);
-    box.innerHTML = '<small class="hint">Anda wajib menghabiskan seluruh nilai Poin Gerak ini untuk melangkah, kecuali dipakai untuk Aksi Bongkar Sandi.</small>';
+    banner(`Jatah Gerak ${G.myPool[G.activePoolIdx].value} aktif (sisa ${G.remainingSteps}). Klik bidak Anda lalu klik petak tujuan — atau lakukan Bongkar Kode untuk mengorbankan Jatah Gerak ini.`);
+    box.innerHTML = '<small class="hint">Anda wajib menghabiskan seluruh nilai Jatah Gerak ini untuk melangkah (tidak boleh dilewati), kecuali dipakai untuk Bongkar Kode.</small>';
   } else {
-    banner('Giliran Anda: pilih satu Poin Gerak di panel Pool Energi untuk mulai melangkah atau menebak.');
-    box.innerHTML = '<small class="hint">Pilih Poin Gerak di bawah dulu.</small>';
+    banner('Operasi Anda: pilih satu Jatah Gerak di panel Cadangan Taktis untuk mulai melangkah atau melakukan Bongkar Kode.');
+    box.innerHTML = '<small class="hint">Pilih Jatah Gerak di bawah dulu.</small>';
   }
   const guessBtn = document.getElementById('btnGuessOpen');
   guessBtn.disabled = !(myTurn && armedFresh && G.guessStats[G.mySide].count<2);
@@ -492,7 +492,7 @@ function onCellClickBattle(cell){
 
   const check = validateMove(G.boardPieces, G.mySide, G.selectedCell, cell);
   if (!check.ok){ flashInvalid(cell); warnInline(check.reason); return; }
-  if (check.cost > G.remainingSteps){ flashInvalid(cell); warnInline('Jarak ini melebihi sisa alokasi Poin Gerak Anda saat ini.'); return; }
+  if (check.cost > G.remainingSteps){ flashInvalid(cell); warnInline('Jarak ini melebihi sisa alokasi Jatah Gerak Anda saat ini.'); return; }
 
   const movedType = G.boardPieces[G.selectedCell].type;
   const capturedPiece = G.boardPieces[cell];
@@ -507,7 +507,7 @@ function onCellClickBattle(cell){
 
   if (check.isKingCapture){
     renderBoard();
-    return endGame(G.mySide, 'Skakmat Fisik — Raja lawan berhasil dimakan.');
+    return endGame(G.mySide, 'Skakmat — Panglima berhasil mengeliminasi Raja lawan.');
   }
 
   if (G.remainingSteps===0){
@@ -543,14 +543,14 @@ function advanceTurn(sideThatActed, usedValue){
   }
 }
 
-// ---------------------------------------------------------------- AKSI BONGKAR SANDI (guess)
+// ---------------------------------------------------------------- BONGKAR KODE (guess)
 document.getElementById('btnGuessOpen').onclick = () => {
   if (G.activePoolIdx===null) return;
   const sacValue = G.myPool[G.activePoolIdx].value;
   showOverlay(`
-    <h2 style="margin-top:0;color:var(--gold);">Aksi Bongkar Sandi</h2>
-    <p style="font-size:.85rem;color:var(--muted);">Tebak kombinasi Kartu Sandi lawan. Tindakan ini akan mengorbankan
-      <b style="color:var(--gold);">Poin Gerak bernilai ${sacValue}</b> yang sudah Anda pilih, beserta giliran Anda.</p>
+    <h2 style="margin-top:0;color:var(--gold);">Bongkar Kode</h2>
+    <p style="font-size:.85rem;color:var(--muted);">Tebak kombinasi Kartu Domino lawan. Tindakan ini akan mengorbankan
+      <b style="color:var(--gold);">Jatah Gerak bernilai ${sacValue}</b> yang sudah Anda pilih, beserta Operasi Anda.</p>
     <div class="row" id="guessTopRow"></div>
     <div class="row" id="guessBotRow" style="margin-top:8px;"></div>
     <div style="margin-top:14px;">
@@ -616,7 +616,7 @@ function handleMessage(msg){
       else log(`[${msg.side==='p1'?'Merah':'Biru'}] ${pieceName(movedType)} bergeser ke ${msg.dest}.`);
       if (movedType==='SR' && capturedPiece && capturedPiece.type==='K'){
         renderBoard();
-        endGame(msg.side, 'Skakmat Fisik — Raja berhasil dimakan lawan.');
+        endGame(msg.side, 'Skakmat — Panglima berhasil mengeliminasi Raja lawan.');
         return;
       }
       renderBoard();
@@ -633,7 +633,7 @@ function handleMessage(msg){
       log(`[${msg.side==='p1'?'Merah':'Biru'}] menebak Atas ${msg.topVal} / Bawah ${msg.bottomVal}.`);
       if (correct){
         deliverGuessResult({side:msg.side, correct:true});
-        endGame(msg.side, 'Bongkar Sandi Akurat — kartu rahasia berhasil ditebak.');
+        endGame(msg.side, 'Bongkar Kode Akurat — Kartu Domino berhasil ditebak.');
         return;
       }
       G.guessStats[msg.side].wrong++;
@@ -651,7 +651,7 @@ function handleMessage(msg){
     case 'guessResult':
       hideOverlay();
       if (msg.correct){
-        endGame(msg.side, msg.side===G.mySide ? 'Bongkar Sandi Akurat — kartu rahasia lawan berhasil ditebak.' : 'Lawan berhasil membongkar Kartu Sandi Anda.');
+        endGame(msg.side, msg.side===G.mySide ? 'Bongkar Kode Akurat — Kartu Domino lawan berhasil ditebak.' : 'Lawan berhasil melakukan Bongkar Kode atas Kartu Domino Anda.');
         return;
       }
       if (msg.fatal){
@@ -700,7 +700,7 @@ function promptGuardSacrifice(){
   const row = document.getElementById('sacRow');
   guards.forEach(([cell,p])=>{
     const b=document.createElement('button');
-    b.textContent = pieceIcon(p.type)+' '+pieceName(p.type)+' ('+cell+')';
+    b.innerHTML = pieceIcon(p.type)+' '+pieceName(p.type)+' ('+cell+')';
     b.onclick = () => {
       delete G.boardPieces[cell];
       send({type:'sacrifice', side:G.mySide, cell});
@@ -755,7 +755,7 @@ function renderTopRedrawUI(){
   const wrap = document.createElement('div'); wrap.className='split-options';
   const seen = new Set();
   DB_ATAS[G.myCard.topVal].forEach(raw=>{
-    const final = applyBonus(raw, G.myCard.topVal).sort((a,b)=>a-b);
+    const final = [...raw].sort((a,b)=>a-b);
     const key = final.join(',');
     if (seen.has(key)) return; seen.add(key);
     const d = document.createElement('div');
@@ -851,8 +851,10 @@ function renderBoard(){
       const piece = G.boardPieces[id];
       if (piece){
         const span = document.createElement('span');
-        span.className = 'piece-'+piece.side;
-        span.textContent = pieceIcon(piece.type);
+        span.className = `piece piece-${piece.side} shape-${piece.type}`;
+        const ico = document.createElement('span'); ico.className='ico'; ico.innerHTML = pieceIcon(piece.type);
+        const lbl = document.createElement('span'); lbl.className='lbl'; lbl.textContent = piece.type;
+        span.appendChild(ico); span.appendChild(lbl);
         div.appendChild(span);
       }
       if (G.selectedCell===id) div.classList.add('selected');
