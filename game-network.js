@@ -770,7 +770,11 @@ function renderTopRedrawUI(){
     wrap.appendChild(d);
   });
   div.appendChild(wrap);
-  div.innerHTML += `<small class="hint" style="display:block;margin-top:6px;">Sisi Bawah Anda tetap [ ${G.myCard.bottomSplit.join(', ')} ] — tidak berubah.</small>`;
+  const hint = document.createElement('small');
+  hint.className = 'hint';
+  hint.style.cssText = 'display:block;margin-top:6px;';
+  hint.textContent = `Sisi Bawah Anda tetap [ ${G.myCard.bottomSplit.join(', ')} ] — tidak berubah.`;
+  div.appendChild(hint);
 }
 
 function checkBothRoundReady(){

@@ -177,18 +177,41 @@ const Bot = {
   },
 
   // ---------------- ancaman terhadap Raja sendiri ----------------
-  // Mengembalikan {attackerCell, kingCell} kalau Raja Biru sedang segaris & terjangkau
-  // Panglima Merah (jarak <=4, lintasan bersih dari bidak lain).
-  findThreatToOwnKing(){
-    const ownKingEntry = Object.entries(G.boardPieces).find(([c,p])=>p.side==='p2'&&p.type==='K');
+  // Cek apakah Raja Biru bisa dieliminasi Panglima Merah SEKARANG JUGA kalau giliran lawan.
+  // Lintasan dianggap aman (tidak mengancam) kalau ada bidak fisik ATAU Zona Blokade milik
+  // Biru sendiri di salah satu petak antara (bukan petak Raja itu sendiri, karena eliminasi
+  // Raja dikecualikan dari blokade Zona Blokade pada petak tujuan — sesuai Bab V.5).
+  kingCapturableIn(board, kingCell){
+    const attackers = Object.entries(board).filter(([c,p])=>p.side==='p1'&&p.type==='SR');
+    for (const [ac] of attackers){
+      if ((rOf(ac)===rOf(kingCell) || cOf(ac)===cOf(kingCell)) && manhattan(ac,kingCell)<=4){
+        if (this.captureLineClear(board, ac, kingCell)) return true;
+      }
+    }
+    return false;
+  },
+  captureLineClear(board, attackerCell, kingCell){
+    const cells = getPathCells(attackerCell, kingCell); // petak2 antara, diakhiri kingCell
+    for (let i=0;i<cells.length-1;i++){ // kecualikan kingCell sendiri
+      const c = cells[i];
+      if (board[c]) return false;                       // terhalang bidak fisik
+      if (checkAuraBlockade(board, c, 'p2')) return false; // terhalang Zona Blokade Biru sendiri
+    }
+    return true;
+  },
+
+  // Mengembalikan {attackerCell, kingCell} kalau Raja Biru sedang benar2 dalam bahaya
+  // eliminasi seketika oleh Panglima Merah.
+  findThreatToOwnKing(board){
+    board = board || G.boardPieces;
+    const ownKingEntry = Object.entries(board).find(([c,p])=>p.side==='p2'&&p.type==='K');
     if (!ownKingEntry) return null;
     const kCell = ownKingEntry[0];
-    const enemyAttackers = Object.entries(G.boardPieces).filter(([c,p])=>p.side==='p1'&&p.type==='SR');
-    for (const [ac] of enemyAttackers){
-      if (rOf(ac)===rOf(kCell) || cOf(ac)===cOf(kCell)){
-        if (manhattan(ac,kCell) <= 4 && !isPathBlockedByAnyPiece(G.boardPieces, ac, kCell)){
-          return { attackerCell: ac, kingCell: kCell };
-        }
+    if (!this.kingCapturableIn(board, kCell)) return null;
+    const attackers = Object.entries(board).filter(([c,p])=>p.side==='p1'&&p.type==='SR');
+    for (const [ac] of attackers){
+      if ((rOf(ac)===rOf(kCell) || cOf(ac)===cOf(kCell)) && manhattan(ac,kCell)<=4 && this.captureLineClear(board, ac, kCell)){
+        return { attackerCell: ac, kingCell: kCell };
       }
     }
     return null;
@@ -211,7 +234,52 @@ const Bot = {
       return;
     }
 
+    const threat = this.findThreatToOwnKing();
+    if (threat){
+      const rescue = this.findBestNeutralizingMove();
+      if (rescue){
+        this.pool[rescue.poolIdx].used = true;
+        handleMessage({type:'move', side:'p2', src:rescue.src, dest:rescue.dest});
+        if (G.gameEnded) return;
+        advanceTurn('p2', rescue.value);
+        return;
+      }
+      // Tak ada satupun gerakan yang bisa menyelamatkan Raja (skakmat tak terhindarkan) —
+      // lanjut ke logika biasa sebagai usaha terbaik terakhir.
+    }
+
     this.executeBestAvailableMove();
+  },
+
+  // Cari SEMUA kemungkinan gerakan (lintas bidak & lintas nilai Jatah Gerak yang tersedia)
+  // yang membuat Raja sendiri TIDAK LAGI bisa dieliminasi seketika, lalu pilih yang terbaik.
+  // Ini adalah gerbang wajib (hard gate) — bukan sekadar bonus skor — supaya bot tidak
+  // pernah kalah karena tergoda opsi lain saat Raja dalam bahaya nyata.
+  findBestNeutralizingMove(){
+    const enemyKingEntry = Object.entries(G.boardPieces).find(([c,p])=>p.side==='p1'&&p.type==='K');
+    const ownKingEntry = Object.entries(G.boardPieces).find(([c,p])=>p.side==='p2'&&p.type==='K');
+    const ownPieces = Object.entries(G.boardPieces).filter(([c,p])=>p.side==='p2');
+    let best = null;
+    this.pool.forEach((slot, idx)=>{
+      if (slot.used) return;
+      ownPieces.forEach(([cell,piece])=>{
+        const moves = movesForPiece(G.boardPieces, 'p2', cell, slot.value);
+        moves.forEach(m=>{
+          if (m.isKingCapture) return; // sudah ditangani jalur menang instan di chooseBestMove
+          const simulated = {...G.boardPieces};
+          delete simulated[cell];
+          simulated[m.dest] = piece;
+          const kingCellAfter = piece.type==='K' ? m.dest : (ownKingEntry ? ownKingEntry[0] : null);
+          if (!kingCellAfter) return;
+          if (this.kingCapturableIn(simulated, kingCellAfter)) return; // masih/tetap bahaya, tolak
+          const score = this.scoreMove(cell, piece, m, enemyKingEntry, ownKingEntry, null);
+          if (!best || score > best.score){
+            best = { src:cell, dest:m.dest, poolIdx:idx, value:slot.value, cost:m.cost, score };
+          }
+        });
+      });
+    });
+    return best;
   },
 
   // Menjamin bidak benar-benar bergerak selama nilai Jatah Gerak masih ada yang belum
@@ -291,6 +359,15 @@ const Bot = {
   scoreMove(src, piece, move, enemyKingEntry, ownKingEntry, threat){
     if (move.isKingCapture) return 1e7;
     let score = Math.random()*3; // jitter kecil biar variatif antar game
+
+    // --- Keamanan universal: jangan sampai gerakan ini membuka/menyisakan jalur eliminasi Raja sendiri ---
+    if (ownKingEntry){
+      const simulated = {...G.boardPieces};
+      delete simulated[src];
+      simulated[move.dest] = piece;
+      const kingCellAfter = piece.type==='K' ? move.dest : ownKingEntry[0];
+      if (this.kingCapturableIn(simulated, kingCellAfter)) score -= 3000;
+    }
 
     // --- Bertahan: prioritas mutlak kalau Raja sendiri sedang terancam ---
     if (threat){
