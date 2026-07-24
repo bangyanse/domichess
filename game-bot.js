@@ -86,6 +86,11 @@ const Bot = {
 
   pickPlacementCell(type){
     const isEmpty = (cell)=>!G.boardPieces[cell];
+    const isSafe = (cell)=>{
+      if (type!=='PH' && type!=='PV') return true;
+      const testBoard = {...G.boardPieces, [cell]: {type, side:'p2'}};
+      return !wouldFullyBlockEnemyBackRow(testBoard, 'p2');
+    };
     if (type==='K'){
       for (const c of shuffle([1,2,3,4,5,6])){ const cell=cellId(6,c); if (isEmpty(cell)) return cell; }
     }
@@ -94,7 +99,9 @@ const Bot = {
       const candidates = shuffle([cellId(5,2),cellId(5,3),cellId(5,4),cellId(5,5),cellId(4,3),cellId(4,4)]);
       for (const cell of candidates) if (isEmpty(cell)) return cell;
     }
-    // Penjaga (Sayap/Poros): sebar di dekat Raja untuk memperluas Zona Blokade pelindung
+    // Penjaga (Sayap/Poros): sebar di dekat Raja untuk memperluas Zona Blokade pelindung —
+    // tapi tetap wajib menyisakan Celah bagi lawan (Celah Wajib), jangan sampai bot
+    // membentengi Rajanya sendiri sampai tak tersentuh.
     const kingEntry = Object.entries(G.boardPieces).find(([c,p])=>p.side==='p2'&&p.type==='K');
     const preferred = [];
     if (kingEntry){
@@ -103,7 +110,12 @@ const Bot = {
     }
     const all = [];
     for (const r of [4,5,6]) for (let c=1;c<=6;c++) all.push(cellId(r,c));
-    for (const cell of shuffle([...preferred, ...all])) if (isEmpty(cell)) return cell;
+    for (const cell of shuffle([...preferred, ...all])){
+      if (isEmpty(cell) && isSafe(cell)) return cell;
+    }
+    // Fallback ekstrem: kalau ternyata semua petak kosong "melanggar" (harusnya nyaris
+    // mustahil di awal game), tetap taruh di sel kosong pertama drpd macet total.
+    for (const cell of shuffle(all)) if (isEmpty(cell)) return cell;
     return null;
   },
 
