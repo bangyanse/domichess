@@ -406,6 +406,14 @@ function onCellClickPlacement(cell){
   if (zone !== G.mySide){ flashInvalid(cell); warnInline('Hanya boleh menempatkan di zona pertahanan sendiri.'); return; }
   if (G.boardPieces[cell]){ flashInvalid(cell); warnInline('Petak sudah terisi.'); return; }
   if (G.armedPlaceType==='K' && !(r===(G.mySide==='p1'?0:6))){ flashInvalid(cell); warnInline('Raja wajib di baris paling ujung.'); return; }
+  if (G.armedPlaceType==='PH' || G.armedPlaceType==='PV'){
+    const testBoard = {...G.boardPieces, [cell]: {type:G.armedPlaceType, side:G.mySide}};
+    if (wouldFullyBlockEnemyBackRow(testBoard, G.mySide)){
+      flashInvalid(cell);
+      warnInline('Dilarang oleh aturan Celah Wajib: penempatan ini akan menutup total akses ke baris Raja lawan.');
+      return;
+    }
+  }
 
   const type = G.armedPlaceType;
   G.boardPieces[cell] = { type, side: G.mySide };

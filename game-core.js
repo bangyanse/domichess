@@ -94,17 +94,69 @@ function checkAuraBlockade(board, targetCell, side){
   return false;
 }
 
-// Celah Wajib: movingSide dilarang menutup total (6 kolom) akses ke baris Raja lawan (enemySide)
-function wouldFullyBlockEnemyBackRow(board, movingSide){
-  const enemySide = movingSide==='p1' ? 'p2' : 'p1';
-  const enemyRowIdx = enemySide==='p2' ? 6 : 0;
-  for (let c=1;c<=6;c++){
-    const tc = cellId(enemyRowIdx,c);
-    if (board[tc]) continue;
-    if (checkAuraBlockade(board, tc, movingSide)) continue;
-    return false;
+// Celah Wajib: apakah movingSide's blokade (dikombinasikan dgn seluruh bidak di papan) membuat
+// baris Raja lawan (enemySide) BENAR-BENAR tak terjangkau — bukan cuma "petaknya kosong", tapi
+// betul-betul bisa dilalui via rangkaian gerakan lurus (boleh muter/berganti bidak), dgn jalur
+// yg tak terhalang bidak fisik maupun Zona Blokade milik movingSide.
+function canTransitCell(board, fromCell, toCell, blockadeAvoidSide){
+  if (moveCost(fromCell, toCell) <= 0) return false; // bukan garis lurus
+  if (board[toCell]) return false; // transit umum: sel tujuan harus kosong
+  if (isPathBlockedByAnyPiece(board, fromCell, toCell)) return false;
+  for (const pc of getPathCells(fromCell, toCell)){
+    if (checkAuraBlockade(board, pc, blockadeAvoidSide)) return false;
   }
   return true;
+}
+// BFS: kumpulan semua petak kosong yg bisa dicapai (gerakan lurus berulang, ganti arah bebas)
+// mulai dari salah satu petak di `startCells`, sambil menghindari blokade `blockadeAvoidSide`.
+function reachableEmptyCells(board, startCells, blockadeAvoidSide){
+  const visited = new Set();
+  const queue = [];
+  startCells.forEach(c=>{ if(!visited.has(c)){ visited.add(c); queue.push(c); } });
+  while (queue.length){
+    const cur = queue.shift();
+    const r0 = rOf(cur), c0 = cOf(cur);
+    for (let c=1;c<=6;c++){
+      const dest = cellId(r0,c);
+      if (visited.has(dest)) continue;
+      if (canTransitCell(board, cur, dest, blockadeAvoidSide)){ visited.add(dest); queue.push(dest); }
+    }
+    for (let r=0;r<7;r++){
+      const dest = cellId(r,c0);
+      if (visited.has(dest)) continue;
+      if (canTransitCell(board, cur, dest, blockadeAvoidSide)){ visited.add(dest); queue.push(dest); }
+    }
+  }
+  return visited;
+}
+// Celah Wajib: apakah Zona Blokade movingSide (dikombinasikan dgn seluruh bidak di papan)
+// membuat baris Raja movingSide SENDIRI benar-benar tak terjangkau oleh lawan — bukan cuma
+// "petaknya kosong", tapi betul-betul bisa dilalui via rangkaian gerakan lurus (boleh
+// muter/berganti bidak), dgn jalur yg tak terhalang bidak fisik maupun Zona Blokade movingSide.
+// (Inilah yg dicegah booklet: pemain dilarang membentengi Rajanya sendiri sampai tak
+// tersentuh lawan sama sekali.)
+function wouldFullyBlockEnemyBackRow(board, movingSide){
+  const kingCell = Object.keys(board).find(c=>board[c].side===movingSide && board[c].type==='K');
+  if (!kingCell) return false; // Raja belum ditempatkan, belum relevan
+  const attackerSide = movingSide==='p1' ? 'p2' : 'p1';
+  const attackerCells = Object.keys(board).filter(c=>board[c].side===attackerSide);
+  if (attackerCells.length===0) return false; // belum ada bidak lawan di papan
+
+  // Semua petak kosong yg bisa dicapai lawan lewat rangkaian gerakan lurus (boleh muter/
+  // ganti bidak berkali-kali), sambil menghindari Zona Blokade milik movingSide.
+  const reachable = reachableEmptyCells(board, attackerCells, movingSide);
+  const launchPoints = [...attackerCells, ...reachable];
+
+  // Raja benar2 tersentuh selama ADA satu saja titik (bidak lawan atau petak yg lawan bisa
+  // capai) dengan garis lurus bersih menuju Raja — Zona Blokade tepat di petak Raja
+  // dikecualikan (Bab V.5), tapi bidak fisik di jalur tetap menghalangi seperti biasa.
+  const kingReachable = launchPoints.some(from=>{
+    if (from===kingCell) return false;
+    if (moveCost(from, kingCell) <= 0) return false;
+    if (isPathBlockedByAnyPiece(board, from, kingCell)) return false;
+    return getPathCells(from, kingCell).every(pc => pc===kingCell || !checkAuraBlockade(board, pc, movingSide));
+  });
+  return !kingReachable;
 }
 
 // Full legality check for a proposed move. Returns {ok:bool, reason, isKingCapture}
